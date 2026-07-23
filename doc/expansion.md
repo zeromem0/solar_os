@@ -42,6 +42,9 @@ while remaining blocked from runtime use.
 | Elecrow CrowPanel ESP32-S3 4.2-inch E-paper | GPIO3, GPIO8, GPIO9, GPIO14-GPIO21, GPIO38 | GPIO8, GPIO9, GPIO14-GPIO21, GPIO38 | GPIO8, GPIO9, GPIO14-GPIO20 | GPIO3 is physically exposed but blocked as a strapping pin. |
 | ESP32-S3-DevKitC-1-N16R8 | ESP32-S3 signals broken out on the DevKitC headers | GPIO1, GPIO2, GPIO4-GPIO7, GPIO10, GPIO14-GPIO18, GPIO21, GPIO39-GPIO42, GPIO47 | GPIO1, GPIO2, GPIO4-GPIO7, GPIO10, GPIO14-GPIO18 | GPIO0/GPIO3/GPIO45/GPIO46 are strapping pins; GPIO19/GPIO20 are native USB; GPIO35-GPIO37 are Octal PSRAM; GPIO38/GPIO48 are reserved for either RGB LED revision; GPIO43/GPIO44 are `uart0`. |
 | ODROID-GO | External IO GPIO4 and GPIO15 | GPIO4, GPIO15 | None | Both pins are also the allowed external chip-select slots on the shared VSPI bus. |
+| M5Stack Core2 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. Port A (SDA GPIO32/SCL GPIO33) is claimed internally by CardKB/dhex/aqm, not exposed as a generic expansion bus. |
+| M5Stack CoreS3 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. Port A I2C is claimed internally by CardKB/dhex/aqm, not exposed as a generic expansion bus. |
+| Waveshare ESP32-S3-Touch-LCD-5 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. GPIO15/16 carry `uart0` (usable as a point-to-point serial port once the board's TJA1051 CAN transceiver is swapped for a MAX232). |
 
 Power and ground pins are physical wiring resources and are not managed by the
 SolarOS pin-claim system. Check the board schematic and the external module's
@@ -55,6 +58,9 @@ voltage and current requirements before connecting it.
 | Elecrow CrowPanel ESP32-S3 4.2-inch E-paper | `uart0`: TX GPIO43, RX GPIO44 | I2C on `i2c0`/`i2c1`, SPI on `spi3`, UART on `uart1`/`uart2`, or named 1-Wire, using approved free pins | SPI3 is shared with microSD and is available for a runtime expansion bus only while the SD card is unmounted. The SSD1683 stays on its dedicated internal SPI2 host. |
 | ESP32-S3-DevKitC-1-N16R8 | `i2c0`: SDA GPIO8, SCL GPIO9; `spi0`: SCK GPIO12, MISO GPIO13, MOSI GPIO11, CS GPIO10/GPIO5/GPIO6/GPIO7; `uart0`: TX GPIO43, RX GPIO44 | I2C on `i2c1`, SPI on `spi3`, UART on `uart1`/`uart2`, or 1-Wire, using approved free pins | The board-defined `spi0` is the normal expansion SPI bus. |
 | ODROID-GO | `spi0`: SCK GPIO18, MISO GPIO19, MOSI GPIO23, CS GPIO15/GPIO4; `uart0`: TX GPIO1, RX GPIO3 | UART on `uart1`/`uart2`, or named 1-Wire, using approved free pins | VSPI is shared with onboard TFT and SD devices; external devices use their own allowed CS slot. |
+| M5Stack Core2 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal display/SD SPI pins and Port A's I2C are not expansion resources. |
+| M5Stack CoreS3 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal display/audio pins and Port A's I2C are not expansion resources. |
+| Waveshare ESP32-S3-Touch-LCD-5 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal RGB panel and CH422G expander pins are not expansion resources. |
 
 I2C and SPI buses accept shared logical leases. UART and registered 1-Wire bus
 instances are exclusive. Registered 1-Wire buses appear in expansion status

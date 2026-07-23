@@ -64,6 +64,9 @@ The current tree includes these board targets:
 | `elecrow_crowpanel_esp32_s3_4_2_epaper` | `elecrow_crowpanel_esp32_s3_4_2_epaper` | Elecrow CrowPanel ESP32-S3 4.2-inch E-paper | ESP32-S3-WROOM-1-N8R8 target with a 400x300 SSD1683 e-paper display, microSD over SDSPI, CH340C/UART console, rotary/menu/exit controls, status LED, Wi-Fi, BLE, and expansion I2C/SPI/UART/1-Wire/GPIO/ADC/PWM. |
 | `odroid_go` | `odroid_go` | Hardkernel ODROID-GO | Classic ESP32 target with ILI9341 display, SD over VSPI/SDSPI, battery ADC, ESP32 DAC speaker, buttons, ADC D-pad, status LED, display brightness, expansion SPI/UART/GPIO/PWM, and runtime GPIO4/GPIO15. |
 | `esp32_s3_devkitc1_n16r8` | `esp32_s3_devkitc1_n16r8` | Espressif ESP32-S3-DevKitC-1-N16R8 | Headless ESP32-S3 target with CDC, UART, Wi-Fi, BLE, expansion I2C/SPI/UART/GPIO/ADC/PWM, graphics through attachable display targets, and no primary display or onboard sensors. |
+| `m5stack_core2` | `m5stack_core2` | M5Stack Core2 | ILI9342C display via AXP192 PMIC bring-up, shared VSPI for LCD+SD, BLE keyboard, FT6336U touch, CardKB Grove keyboard, BM8563 RTC. |
+| `m5stack_cores3` | `m5stack_cores3` | M5Stack CoreS3 | ILI9342C display through the AXP2101 PMIC + AW9523B I2C GPIO expander, adjustable backlight, AW88298 speaker over I2S1, FT6336U touch, CardKB Grove keyboard, dhex/aqm apps over Port A, BM8563 RTC, Wi-Fi/BLE, USB CDC + UART0 consoles, quad-PSRAM. |
+| `waveshare_esp32_s3_touch_lcd_5` | `waveshare_esp32_s3_touch_lcd_5` | Waveshare ESP32-S3-Touch-LCD-5 | 800x480 RGB-parallel ST7262 panel with double-buffered present, CH422G I2C GPIO expander, GT911 capacitive touch, PCF85063 RTC, SD over SPI, and UART on GPIO15/16. |
 
 ## Board Profile
 
@@ -245,6 +248,10 @@ The current capability flags are:
 | `DISPLAY_BRIGHTNESS` | Display backlight or brightness control is available. |
 | `TEMPERATURE` | Temperature sensor service. |
 | `HUMIDITY` | Humidity sensor service. |
+| `TOUCH` | Touch panel driver is available behind the generic `solar_os_touch` facade. |
+| `CARDKB` | M5Stack CardKB Grove keyboard input is available. |
+| `PM_UART` | A dedicated UART is wired for a particle-matter sensor. |
+| `PORT_A_I2C` | Grove Port A's I2C bus is available for expansion sensors. |
 
 `src/CMakeLists.txt` validates that every enabled driver-backed capability has a
 matching selector, then consumes `SOLAR_OS_BOARD_SRCS` and

@@ -12,19 +12,10 @@
 #define SOLAR_OS_BOARD_VENDOR "M5Stack"
 #define SOLAR_OS_BOARD_MODULE_NAME "ESP32-S3"
 
-#define SOLAR_OS_BOARD_CAPABILITIES \
-    (SOLAR_OS_BOARD_CAP_PSRAM | \
-     SOLAR_OS_BOARD_CAP_SIMD | \
-     SOLAR_OS_BOARD_CAP_DISPLAY | \
-     SOLAR_OS_BOARD_CAP_GFX | \
-     SOLAR_OS_BOARD_CAP_CDC | \
-     SOLAR_OS_BOARD_CAP_UART | \
-     SOLAR_OS_BOARD_CAP_I2C | \
-     SOLAR_OS_BOARD_CAP_SPI | \
-     SOLAR_OS_BOARD_CAP_RTC | \
-     SOLAR_OS_BOARD_CAP_WIFI | \
-     SOLAR_OS_BOARD_CAP_BLE | \
-     SOLAR_OS_BOARD_CAP_AUDIO)
+/* No expansion GPIO pins exposed yet -- this is still a minimal port
+ * (no buttons/joystick/dpad, no expansion I2C/SPI/UART/ADC/PWM). */
+#define SOLAR_OS_BOARD_EXPANSION_GPIO_LIST ""
+#define SOLAR_OS_BOARD_USER_GPIO_LIST ""
 
 /*
  * ILI9342C, 320x240 -- same command family/controller as Core2, so

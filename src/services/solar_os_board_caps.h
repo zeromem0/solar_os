@@ -44,6 +44,7 @@ typedef uint64_t solar_os_board_capability_t;
 #define SOLAR_OS_BOARD_CAP_CARDKB (1ULL << 32)
 #define SOLAR_OS_BOARD_CAP_PM_UART (1ULL << 33)
 #define SOLAR_OS_BOARD_CAP_PORT_A_I2C (1ULL << 34)
+#define SOLAR_OS_BOARD_CAP_TOUCH (1ULL << 35)
 
 #ifndef SOLAR_OS_BOARD_HAS_PSRAM
 #define SOLAR_OS_BOARD_HAS_PSRAM 0
@@ -137,6 +138,9 @@ typedef uint64_t solar_os_board_capability_t;
 #endif
 #ifndef SOLAR_OS_BOARD_HAS_PORT_A_I2C
 #define SOLAR_OS_BOARD_HAS_PORT_A_I2C 0
+#endif
+#ifndef SOLAR_OS_BOARD_HAS_TOUCH
+#define SOLAR_OS_BOARD_HAS_TOUCH 0
 #endif
 #ifndef SOLAR_OS_BOARD_HAS_TEMPERATURE
 #define SOLAR_OS_BOARD_HAS_TEMPERATURE 0

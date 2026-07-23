@@ -11,6 +11,11 @@
 #define SOLAR_OS_BOARD_VENDOR "M5Stack"
 #define SOLAR_OS_BOARD_MODULE_NAME "ESP32-D0WDQ6"
 
+/* No expansion GPIO pins exposed yet -- this is still a minimal port
+ * (no buttons/joystick/dpad, no expansion I2C/SPI/UART/ADC/PWM). */
+#define SOLAR_OS_BOARD_EXPANSION_GPIO_LIST ""
+#define SOLAR_OS_BOARD_USER_GPIO_LIST ""
+
 /* USB-UART bridge (CP2104/CH9102) on the classic ESP32 UART0 pins. */
 #define SOLAR_OS_BOARD_UART_PORT UART_NUM_0
 #define SOLAR_OS_BOARD_PIN_UART_TX GPIO_NUM_1
