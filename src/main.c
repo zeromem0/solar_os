@@ -1320,6 +1320,16 @@ static void start_fallback_shell_if_needed(void)
         if (!board_has(fallback_ports[i].capability)) {
             continue;
         }
+#ifdef SOLAR_OS_BOARD_UART_NO_FALLBACK_SHELL
+        /* The board declares its UART RX as noise-prone when nothing
+         * deliberate is attached (see the board header) -- a parked
+         * shell there executes garbage lines nonstop, and the flash
+         * I/O each executed line now costs starves the rest of the
+         * system. The port stays registered for explicit use. */
+        if (fallback_ports[i].capability == SOLAR_OS_BOARD_CAP_UART) {
+            continue;
+        }
+#endif
         had_candidate = true;
 
         uint8_t session_id = 0;

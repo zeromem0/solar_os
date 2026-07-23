@@ -10,19 +10,10 @@
 #define SOLAR_OS_BOARD_VENDOR "Waveshare"
 #define SOLAR_OS_BOARD_MODULE_NAME "ESP32-S3-WROOM-1-N16R8"
 
-#define SOLAR_OS_BOARD_CAPABILITIES \
-    (SOLAR_OS_BOARD_CAP_PSRAM | \
-     SOLAR_OS_BOARD_CAP_SIMD | \
-     SOLAR_OS_BOARD_CAP_DISPLAY | \
-     SOLAR_OS_BOARD_CAP_GFX | \
-     SOLAR_OS_BOARD_CAP_CDC | \
-     SOLAR_OS_BOARD_CAP_UART | \
-     SOLAR_OS_BOARD_CAP_SD | \
-     SOLAR_OS_BOARD_CAP_I2C | \
-     SOLAR_OS_BOARD_CAP_SPI | \
-     SOLAR_OS_BOARD_CAP_RTC | \
-     SOLAR_OS_BOARD_CAP_WIFI | \
-     SOLAR_OS_BOARD_CAP_BLE)
+/* No expansion GPIO pins exposed yet -- this is still a minimal port
+ * (no buttons/joystick/dpad, no expansion I2C/SPI/UART/ADC/PWM). */
+#define SOLAR_OS_BOARD_EXPANSION_GPIO_LIST ""
+#define SOLAR_OS_BOARD_USER_GPIO_LIST ""
 
 /*
  * solar_os_ble_keyboard_init() hangs boot indefinitely on this board
@@ -143,6 +134,19 @@
 #define SOLAR_OS_BOARD_UART_PORT UART_NUM_1
 #define SOLAR_OS_BOARD_PIN_UART_TX GPIO_NUM_15
 #define SOLAR_OS_BOARD_PIN_UART_RX GPIO_NUM_16
+/*
+ * With the stock TJA1051 still populated, its RXD output actively
+ * drives GPIO16 -- and with no CAN bus attached the receiver
+ * oscillates, which UART1 at 115200 decodes as a continuous stream of
+ * garbage bytes. A fallback shell on that port then "executes" junk
+ * lines nonstop; each executed line persists shell history to flash
+ * and scans the alias file, and those constant flash commits (which
+ * disable the cache on both CPUs) starve the display's PSRAM feed,
+ * the USB console, and the idle task (watchdog trips). Keep the port
+ * registered for deliberate use (com app, bridge), but never park an
+ * autonomous shell on it until the transceiver is swapped.
+ */
+#define SOLAR_OS_BOARD_UART_NO_FALLBACK_SHELL 1
 
 /*
  * Minimal port: display, RTC, SD, UART, connectivity. Not yet wired:

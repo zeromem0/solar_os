@@ -24,3 +24,18 @@ CONFIG_SPIRAM_SPEED_120M=y
 # timing-tuning table does not exist). The board vendor's demo
 # firmware ships this same 120/120 pairing.
 CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+
+# The shared sdkconfig.defaults now prefers PSRAM aggressively for
+# ordinary allocations, Wi-Fi/LWIP buffers, FreeRTOS task stacks, and
+# Bluetooth buffers (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=0,
+# CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP, CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM,
+# CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST). That's more PSRAM bus
+# traffic contending with the continuous ~45MB/s the panel already
+# needs (see above) -- the 120MHz/50% headroom was sized against the
+# old, more conservative allocation policy, not this one. Reverting
+# to the conservative policy on this board only, since the display's
+# PSRAM bandwidth requirement is unusually tight and board-specific.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+# CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP is not set
+# CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM is not set
+# CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST is not set

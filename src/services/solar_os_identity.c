@@ -87,20 +87,45 @@ static void identity_read_file(const char *name,
     fclose(file);
 }
 
+/*
+ * Nothing writes these files at runtime -- they're meant to be edited
+ * by hand (`edit .solar/user`) and take effect on the next boot, the
+ * same way /etc/hostname does. Cache each on first read instead of
+ * re-opening the file (a full fopen/fgets/fclose through the storage
+ * layer) on every single call: solar_os_identity_format() is called
+ * from the shell's prompt redraw, so an uncached read turns into
+ * storage I/O on every keystroke, competing with whatever else is
+ * touching flash (Wi-Fi's NVS writes while it's still connecting, for
+ * one) badly enough on some boards to starve the idle task and trip
+ * the watchdog.
+ */
+static bool identity_user_cached;
+static char identity_user_cache[SOLAR_OS_IDENTITY_USER_MAX];
+static bool identity_hostname_cached;
+static char identity_hostname_cache[SOLAR_OS_IDENTITY_HOSTNAME_MAX];
+
 void solar_os_identity_get_user(char *buffer, size_t len)
 {
-    identity_read_file(SOLAR_OS_IDENTITY_USER_FILE,
-                       SOLAR_OS_IDENTITY_DEFAULT_USER,
-                       buffer,
-                       len);
+    if (!identity_user_cached) {
+        identity_read_file(SOLAR_OS_IDENTITY_USER_FILE,
+                           SOLAR_OS_IDENTITY_DEFAULT_USER,
+                           identity_user_cache,
+                           sizeof(identity_user_cache));
+        identity_user_cached = true;
+    }
+    strlcpy(buffer, identity_user_cache, len);
 }
 
 void solar_os_identity_get_hostname(char *buffer, size_t len)
 {
-    identity_read_file(SOLAR_OS_IDENTITY_HOSTNAME_FILE,
-                       SOLAR_OS_IDENTITY_DEFAULT_HOSTNAME,
-                       buffer,
-                       len);
+    if (!identity_hostname_cached) {
+        identity_read_file(SOLAR_OS_IDENTITY_HOSTNAME_FILE,
+                           SOLAR_OS_IDENTITY_DEFAULT_HOSTNAME,
+                           identity_hostname_cache,
+                           sizeof(identity_hostname_cache));
+        identity_hostname_cached = true;
+    }
+    strlcpy(buffer, identity_hostname_cache, len);
 }
 
 void solar_os_identity_format(char *buffer, size_t len)

@@ -9,6 +9,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
+#include "esp_wifi.h"
 #include "solar_os_jobs.h"
 #include "solar_os_log.h"
 #include "solar_os_remote_input.h"
@@ -477,6 +478,16 @@ static esp_err_t remote_job_start(solar_os_context_t *ctx, int argc, char **argv
                                       net,
                                       "listen");
 
+    /*
+     * The screen stream is latency-sensitive: with the SolarOS default
+     * of WIFI_PS_MAX_MODEM every response gets beacon-interval stalls,
+     * which on this stream shows up as mid-body send timeouts
+     * (httpd_sock_err errno 11) on anything bigger than a packet or
+     * two. Keep modem power save off while the job runs and restore
+     * the default on stop. Harmlessly fails if Wi-Fi isn't started.
+     */
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+
     SOLAR_OS_LOGI(TAG, "remote screen share on port %u", (unsigned)port);
     return ESP_OK;
 }
@@ -488,6 +499,8 @@ static void remote_job_stop(solar_os_context_t *ctx)
     if (remote_job.server != NULL) {
         (void)httpd_stop(remote_job.server);
     }
+
+    (void)esp_wifi_set_ps(WIFI_PS_MAX_MODEM);
 
     SOLAR_OS_LOGI(TAG,
              "stopped: frames=%u keys=%u port=%u",
