@@ -17,8 +17,10 @@ job status [name]
 
 `jobs` is intentionally compact so it fits on the built-in 65-column display
 terminal. It shows job name, state, kind, event source, tick count, and resource
-count. Use `job status <name>` for the summary, owner string, last error, and
-claimed resources.
+count. Use `job status <name>` for the summary, owner string, last error,
+effective tick interval/deadline, runtime duration statistics, deadline misses,
+and claimed resources. Compact timing lines use `interval/deadline` in
+milliseconds, `n` for dispatches, `us=last/max`, and `miss` for deadline misses.
 
 ## Job Control
 
@@ -39,6 +41,14 @@ job-specific inspection code in the shell.
 
 Jobs that use byte-stream ports claim those ports while running. If a port is
 already owned, SolarOS reports the owner, for example `job log owns cdc0`.
+Radio listeners expose their radio as a custom job resource.
+
+Tick intervals and execution-time deadlines are declared by each event-driven
+job. A zero descriptor value selects the runtime default. Deadline misses do
+not forcibly terminate a cooperative handler; SolarOS counts them, records the
+last and maximum duration, and emits rate-limited warnings. The DAQ and log
+handlers only enqueue work, so their stream, filesystem, and port I/O runs in
+isolated worker tasks instead of the display scheduler.
 
 Compact list example:
 
@@ -56,6 +66,7 @@ NAME         STATE    KIND        EVT  TICKS RES
 log          running  background  tick     8   1
   summary: stream SolarOS logs to a port or file
   owner: job:log
+  tick: 250/2ms n=8 us=18/31 miss=0
   resources:
   - port   cdc0 rw
 ```
@@ -154,6 +165,40 @@ Notes:
 - The two ports must be different.
 - Both ports are claimed by the bridge job until it stops.
 - This is the clean base for USB-to-UART converter style workflows.
+
+## chat-sync
+
+Background client synchronizer for the transport-neutral chat service. Start and
+stop it explicitly, using the same lifecycle as `email-sync`:
+
+```text
+job start chat-sync
+job stop chat-sync
+job status chat-sync
+```
+
+`chat-sync` takes no polling interval. Unlike the periodic `email-sync` job, it
+maintains a live connection and applies its own exponential reconnect backoff.
+It can therefore be started before Wi-Fi has an address; it remains running and
+connects when the network becomes available. In `/.shell/startup`, use exactly:
+
+```text
+job start chat-sync
+```
+
+It owns transport connection lifetime, exponential retry, opaque resume cursors,
+joined-channel replay, outbound queue delivery, retained message publication,
+and chat notifications in the universal inbox. Replayed transport messages are
+deduplicated by the shared stable producer identity before another notification
+is published.
+Stopping or closing `app.chat` has no effect on this job. Its worker performs
+transport startup, polling, and retry work outside the cooperative session/job
+scheduler.
+
+The store retains at most 64 messages. SD-backed systems use the full-message
+`/.chat/messages.bin` ring. Systems using internal flash restore Chat history
+from the compact records already stored in `/.inbox/messages.bin`; no second
+ring is created, so Chat history cannot consume the remaining flash volume.
 
 ## chatd
 
@@ -363,7 +408,8 @@ Notes:
 
 ## ntp-sync
 
-Network time synchronization job. It updates SolarOS time and the RTC from NTP.
+Network time synchronization job. It updates the SolarOS wall clock from NTP
+and also updates the hardware RTC when the board provides one.
 
 Usage:
 
@@ -394,6 +440,48 @@ Notes:
 - In `once` mode, the job retries at the interval until the first successful
   sync, then stops itself.
 - Without `once`, it keeps syncing periodically.
+
+## email-sync
+
+Receive-only IMAPS mailbox polling job. It fetches mail into the provider-local
+`email` app and publishes each new message to the universal inbox.
+
+Usage:
+
+```text
+job start email-sync [interval-sec] [once]
+job stop email-sync
+job status email-sync
+```
+
+The default interval is 300 seconds; accepted values are 30 through 86400
+seconds. `once` stops the job after one attempt. The account must be configured
+first:
+
+```text
+wifi on
+email configure imaps://imap.example.com user@example.com app-password INBOX
+job start email-sync 300
+```
+
+To start polling after each reboot, add the following after `wifi on` in
+`/.shell/startup`:
+
+```text
+job start email-sync 300
+```
+
+Notes:
+
+- TLS certificate validation is mandatory; plaintext IMAP is not accepted.
+- The first synchronization imports up to the newest eight messages. Later
+  polls process new UIDs in batches of eight, so a busy mailbox catches up over
+  successive intervals without overflowing the response buffer.
+- The provider-local list keeps 32 messages in volatile memory. Universal inbox
+  notifications use the mailbox as topic, the `From` header as sender, and the
+  subject as title.
+- Body previews are best effort. Full MIME decoding, attachments, SMTP sending,
+  and server-side read-state synchronization remain future work.
 
 ## remote
 
@@ -435,6 +523,50 @@ Notes:
 - No authentication -- LAN use only, same trust model as the httpd job.
 - On builds with the irrigation web editor, `irrigd` attaches the schedule
   editor to this server at `/irrig` (see irrigd above).
+
+## pocsag
+
+POCSAG pager receiver job. It configures a registered packet radio for a
+continuous POCSAG byte stream, frames successive 64-byte batches, filters pages
+to one receiver identity code (RIC), decodes alphanumeric or numeric payloads,
+and publishes completed messages to the universal inbox.
+
+Usage:
+
+```text
+job start pocsag <radio> <frequency-hz> <baud> <ric> [alpha|numeric] [normal|inverted]
+job stop pocsag
+job status pocsag
+pocsag status
+pocsag send <radio> <frequency-hz> <baud> <ric> <message> [alpha|numeric] [normal|inverted] [function]
+```
+
+Example:
+
+```text
+job start pocsag radio 448425000 1200 1841525 alpha
+inbox list unread
+
+job stop pocsag
+pocsag send radio 448425000 1200 1841525 "SolarOS calling" alpha inverted
+```
+
+Notes:
+
+- The decoder validates POCSAG parity and BCH and corrects up to two erroneous
+  bits per codeword.
+- Messages may continue across batch boundaries; the receiver follows the sync
+  words between batches until the page is complete.
+- Identical repeated pages received within 30 seconds produce one inbox entry.
+- The default FSK polarity is `normal`; retry with `inverted` if batches remain
+  at zero while the transmitter is active.
+- `pocsag status` shows batch/message counts, corrections, receive errors, and
+  the RSSI of the most recent batch.
+- Stopping the job restores the radio configuration and state that were active
+  when it started.
+- Sending supports messages spanning multiple batches and restores the radio's
+  previous configuration afterward. A receiver job using the same half-duplex
+  radio must be stopped first.
 
 ## slip
 

@@ -45,9 +45,6 @@ typedef uint64_t solar_os_board_capability_t;
 #define SOLAR_OS_BOARD_CAP_PM_UART (1ULL << 33)
 #define SOLAR_OS_BOARD_CAP_PORT_A_I2C (1ULL << 34)
 
-#ifndef SOLAR_OS_BOARD_CAPABILITIES
-#define SOLAR_OS_BOARD_CAPABILITIES 0ULL
-#endif
 #ifndef SOLAR_OS_BOARD_HAS_PSRAM
 #define SOLAR_OS_BOARD_HAS_PSRAM 0
 #endif

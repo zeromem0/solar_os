@@ -13,25 +13,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_heap_caps.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "solar_os_app_registry.h"
+#if SOLAR_OS_PACKAGE_SERVICE_BLE
 #include "solar_os_ble_keyboard.h"
+#endif
 #include "solar_os_config.h"
 #include "solar_os_display.h"
 #include "solar_os_fonts.h"
 #include "solar_os_identity.h"
 #include "solar_os_jobs.h"
 #include "solar_os_log.h"
+#include "solar_os_memory.h"
+#include "solar_os_task.h"
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
 #include "solar_os_ota.h"
+#endif
 #include "solar_os_port.h"
 #include "solar_os_port_shell.h"
 #include "solar_os_sessions.h"
 #include "solar_os_shell.h"
-#if SOLAR_OS_PACKAGE_NET
+#if SOLAR_OS_PACKAGE_SERVICE_SSH
 #include "solar_os_ssh_keys.h"
 #endif
 #include "solar_os_storage.h"
@@ -40,7 +45,9 @@
 #include "solar_os_terminal.h"
 #include "solar_os_time.h"
 #include "solar_os_transfer.h"
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
 #include "solar_os_wifi.h"
+#endif
 
 #define XFER_DELAY_MAX_MS 60000U
 #define XFER_IDLE_MAX_MS 86400000U
@@ -201,6 +208,7 @@ static void format_bytes(uint64_t bytes, char *buffer, size_t buffer_len)
              units[unit_index]);
 }
 
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
 static void ota_print_usage(solar_os_shell_io_t *term)
 {
     solar_os_shell_io_writeln(term, "usage:");
@@ -211,6 +219,7 @@ static void ota_print_usage(solar_os_shell_io_t *term)
     solar_os_shell_io_writeln(term, "  ota flavor [flavor]");
     solar_os_shell_io_writeln(term, "  ota boot 0|1");
 }
+#endif
 
 static void display_print_usage(solar_os_shell_io_t *term)
 {
@@ -393,6 +402,7 @@ void solar_os_shell_cmd_display(solar_os_context_t *ctx, int argc, char **argv)
     display_print_usage(term);
 }
 
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
 static void ota_print_partition(solar_os_shell_io_t *term,
                                 const char *role,
                                 const solar_os_ota_partition_t *partition)
@@ -618,7 +628,7 @@ static void ota_upgrade_task(void *arg)
                       (unsigned)uxTaskGetStackHighWaterMark(NULL));
         worker->done = true;
     }
-    vTaskDelete(NULL);
+    solar_os_task_delete_internal(NULL);
 }
 
 static esp_err_t ota_run_upgrade_worker(ota_shell_progress_t *progress)
@@ -634,12 +644,13 @@ static esp_err_t ota_run_upgrade_worker(ota_shell_progress_t *progress)
     };
 
     TaskHandle_t task = NULL;
-    if (xTaskCreate(ota_upgrade_task,
-                    "ota_upgrade",
-                    OTA_UPGRADE_TASK_STACK,
-                    &worker,
-                    tskIDLE_PRIORITY + 2,
-                    &task) != pdPASS) {
+    if (solar_os_task_create_pinned_internal(ota_upgrade_task,
+                                             "ota_upgrade",
+                                             OTA_UPGRADE_TASK_STACK,
+                                             &worker,
+                                             tskIDLE_PRIORITY + 2,
+                                             &task,
+                                             tskNO_AFFINITY) != pdPASS) {
         SOLAR_OS_LOGW("solar_os_shell",
                       "OTA upgrade task create failed stack=%u internal_free=%u "
                       "internal_largest=%u",
@@ -846,6 +857,7 @@ void solar_os_shell_cmd_ota(solar_os_context_t *ctx, int argc, char **argv)
 
     ota_print_usage(term);
 }
+#endif
 
 void solar_os_shell_cmd_apps(solar_os_context_t *ctx, int argc, char **argv)
 {
@@ -923,6 +935,17 @@ static void job_print_status(solar_os_shell_io_t *term,
     solar_os_shell_io_printf(term,
                              "  owner: %s\n",
                              status->owner[0] != '\0' ? status->owner : "-");
+    if (status->has_event) {
+        solar_os_shell_io_printf(term,
+                                 "  tick: %" PRIu32 "/%" PRIu32 "ms n=%" PRIu32
+                                 " us=%" PRIu32 "/%" PRIu32 " miss=%" PRIu32 "\n",
+                                 status->tick_stats.interval_ms,
+                                 status->tick_stats.deadline_ms,
+                                 status->tick_stats.dispatch_count,
+                                 status->tick_stats.last_duration_us,
+                                 status->tick_stats.max_duration_us,
+                                 status->tick_stats.deadline_miss_count);
+    }
     if (status->resource_count == 0) {
         solar_os_shell_io_writeln(term, "  resources: none");
         return;
@@ -1208,10 +1231,14 @@ static void setterm_print_usage(solar_os_shell_io_t *term)
     solar_os_shell_io_writeln(term, "  setterm textsize [12|14|16|18|20]");
     solar_os_shell_io_writeln(term, "  setterm brightness [0..100]");
     solar_os_shell_io_writeln(term, "  setterm profile [vt100|ansi|dumb]");
+#if SOLAR_OS_PACKAGE_SERVICE_BLE
     solar_os_shell_io_writeln(term, "  setterm keyboard [us|de]");
     solar_os_shell_io_writeln(term, "  setterm keyrate [off|1..60 [delay-ms]]");
+#endif
     solar_os_shell_io_writeln(term, "  setterm timezone [UTC|Europe/Berlin|POSIX-TZ]");
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
     solar_os_shell_io_writeln(term, "  setterm otaurl [url]");
+#endif
 }
 
 static void setterm_print_save_result(solar_os_shell_io_t *term,
@@ -1231,6 +1258,7 @@ static void setterm_print_save_result(solar_os_shell_io_t *term,
     }
 }
 
+#if SOLAR_OS_PACKAGE_SERVICE_BLE
 static void setterm_print_keyrate(solar_os_shell_io_t *term)
 {
     uint16_t keyrate = 0;
@@ -1260,6 +1288,7 @@ static void setterm_print_keyrate_result(solar_os_shell_io_t *term, esp_err_t er
                                  esp_err_to_name(err));
     }
 }
+#endif
 
 void solar_os_shell_cmd_setterm(solar_os_context_t *ctx, int argc, char **argv)
 {
@@ -1422,6 +1451,7 @@ void solar_os_shell_cmd_setterm(solar_os_context_t *ctx, int argc, char **argv)
         return;
     }
 
+#if SOLAR_OS_PACKAGE_SERVICE_BLE
     if (strcmp(argv[1], "keyboard") == 0 || strcmp(argv[1], "keymap") == 0) {
         if (argc == 2) {
             solar_os_shell_io_printf(term,
@@ -1502,6 +1532,7 @@ void solar_os_shell_cmd_setterm(solar_os_context_t *ctx, int argc, char **argv)
         setterm_print_keyrate_result(term, err);
         return;
     }
+#endif
 
     if (strcmp(argv[1], "timezone") == 0) {
         char timezone[SOLAR_OS_TIMEZONE_NAME_MAX];
@@ -1534,6 +1565,7 @@ void solar_os_shell_cmd_setterm(solar_os_context_t *ctx, int argc, char **argv)
         return;
     }
 
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
     if (strcmp(argv[1], "otaurl") == 0 || strcmp(argv[1], "ota") == 0) {
         if (argc == 2) {
             char url[SOLAR_OS_OTA_URL_MAX];
@@ -1562,6 +1594,7 @@ void solar_os_shell_cmd_setterm(solar_os_context_t *ctx, int argc, char **argv)
         setterm_print_save_result(term, "otaurl", argv[2], err);
         return;
     }
+#endif
 
     setterm_print_usage(term);
 }
@@ -1724,11 +1757,9 @@ static void log_cmd_show(solar_os_shell_io_t *term, int argc, char **argv)
         return;
     }
 
-    solar_os_log_entry_t *entries =
-        heap_caps_malloc(sizeof(*entries) * count, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (entries == NULL) {
-        entries = heap_caps_malloc(sizeof(*entries) * count, MALLOC_CAP_8BIT);
-    }
+    solar_os_log_entry_t *entries = solar_os_memory_alloc(sizeof(*entries) * count,
+                                                           SOLAR_OS_MEMORY_TRANSIENT,
+                                                           "shell.log");
     if (entries == NULL) {
         solar_os_shell_io_writeln(term, "log show: no memory");
         return;
@@ -1738,7 +1769,7 @@ static void log_cmd_show(solar_os_shell_io_t *term, int argc, char **argv)
     const size_t copied = solar_os_log_snapshot(entries, count, &total);
     if (copied == 0) {
         solar_os_shell_io_writeln(term, "logs: empty");
-        free(entries);
+        solar_os_memory_free(entries);
         return;
     }
 
@@ -1764,7 +1795,7 @@ static void log_cmd_show(solar_os_shell_io_t *term, int argc, char **argv)
                                  entry->truncated ? "..." : "");
     }
 
-    free(entries);
+    solar_os_memory_free(entries);
 }
 
 static void log_cmd_follow(solar_os_context_t *ctx, int argc, char **argv)
@@ -2090,6 +2121,7 @@ static bool xfer_read_cancel_key(void *user)
     char chars[8];
     size_t count;
 
+#if SOLAR_OS_PACKAGE_SERVICE_BLE
     while ((count = solar_os_ble_keyboard_read_chars(chars, sizeof(chars))) > 0) {
         for (size_t i = 0; i < count; i++) {
             if ((uint8_t)chars[i] == SOLAR_OS_KEY_APP_EXIT) {
@@ -2097,6 +2129,10 @@ static bool xfer_read_cancel_key(void *user)
             }
         }
     }
+#else
+    (void)chars;
+    (void)count;
+#endif
 
     solar_os_shell_io_t *term = state != NULL ? state->term : NULL;
     if (term == NULL ||
@@ -2241,7 +2277,7 @@ void solar_os_shell_cmd_xfer(solar_os_context_t *ctx, int argc, char **argv)
 
 
 
-#if SOLAR_OS_PACKAGE_NET
+#if SOLAR_OS_PACKAGE_SERVICE_SSH
 static void sshkey_print_usage(solar_os_shell_io_t *term)
 {
     solar_os_shell_io_writeln(term, "usage:");

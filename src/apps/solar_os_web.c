@@ -10,17 +10,17 @@
 #include <string.h>
 #include <strings.h>
 
-#include "esp_crt_bundle.h"
 #include "esp_err.h"
-#include "esp_heap_caps.h"
-#include "esp_http_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "sdkconfig.h"
 #include "solar_os_gfx.h"
+#include "solar_os_http_client.h"
 #include "solar_os_keys.h"
 #include "solar_os_log.h"
+#include "solar_os_memory.h"
+#include "solar_os_queue.h"
 #include "solar_os_stb_image.h"
 #include "solar_os_task.h"
 #include "solar_os_webp_decoder.h"
@@ -161,7 +161,7 @@ typedef struct {
     volatile bool task_done;
     TaskHandle_t task;
     QueueHandle_t events;
-    esp_http_client_handle_t client;
+    solar_os_http_request_t *request;
     uint8_t *html;
     size_t html_len;
     web_line_t *lines;
@@ -194,37 +194,70 @@ typedef struct {
 
 static const char *TAG = "solar_os_web";
 static web_state_t *web_state;
+static StaticSemaphore_t web_request_lock_storage;
+static SemaphoreHandle_t web_request_lock;
 #define web (*web_state)
 
 static bool web_resolve_url(const char *base, const char *href, char *out, size_t out_len);
 static const char *web_current_base_url(void);
 
-static void *web_malloc(size_t size)
+static void *web_malloc(size_t size, const char *tag)
 {
-    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr == NULL) {
-        ptr = heap_caps_malloc(size, MALLOC_CAP_8BIT);
-    }
-    return ptr;
+    return solar_os_memory_alloc(size, SOLAR_OS_MEMORY_EXTERNAL_REQUIRED, tag);
 }
 
-static void *web_calloc(size_t count, size_t size)
+static void *web_calloc(size_t count, size_t size, const char *tag)
 {
-    void *ptr = heap_caps_calloc(count, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr == NULL) {
-        ptr = heap_caps_calloc(count, size, MALLOC_CAP_8BIT);
-    }
-    return ptr;
+    return solar_os_memory_calloc(count,
+                                  size,
+                                  SOLAR_OS_MEMORY_EXTERNAL_REQUIRED,
+                                  tag);
 }
 
 static web_state_t *web_alloc_state(void)
 {
-    return web_calloc(1, sizeof(web_state_t));
+    if (web_request_lock == NULL) {
+        web_request_lock = xSemaphoreCreateMutexStatic(&web_request_lock_storage);
+        if (web_request_lock == NULL) {
+            return NULL;
+        }
+    }
+    return web_calloc(1, sizeof(web_state_t), "web.state");
+}
+
+static void web_publish_request(solar_os_http_request_t *request)
+{
+    xSemaphoreTake(web_request_lock, portMAX_DELAY);
+    web.request = request;
+    xSemaphoreGive(web_request_lock);
+}
+
+static void web_release_request(solar_os_http_request_t *request)
+{
+    if (request == NULL) {
+        return;
+    }
+
+    xSemaphoreTake(web_request_lock, portMAX_DELAY);
+    if (web.request == request) {
+        web.request = NULL;
+    }
+    xSemaphoreGive(web_request_lock);
+    (void)solar_os_http_request_destroy(request);
+}
+
+static void web_cancel_request(void)
+{
+    xSemaphoreTake(web_request_lock, portMAX_DELAY);
+    if (web.request != NULL) {
+        (void)solar_os_http_request_cancel(web.request);
+    }
+    xSemaphoreGive(web_request_lock);
 }
 
 static void web_free_state(void)
 {
-    heap_caps_free(web_state);
+    solar_os_memory_free(web_state);
     web_state = NULL;
 }
 
@@ -357,14 +390,15 @@ static void web_reset_document(void)
 
 static bool web_allocate_buffers(void)
 {
-    web.html = web_malloc(WEB_HTML_MAX + 1U);
-    web.lines = web_calloc(WEB_LINE_COUNT, sizeof(web.lines[0]));
-    web.links = web_calloc(WEB_LINK_COUNT, sizeof(web.links[0]));
-    web.controls = web_calloc(WEB_CONTROL_COUNT, sizeof(web.controls[0]));
-    web.forms = web_calloc(WEB_FORM_COUNT, sizeof(web.forms[0]));
-    web.images = web_calloc(WEB_IMAGE_COUNT, sizeof(web.images[0]));
-    web.items = web_calloc(WEB_ITEM_COUNT, sizeof(web.items[0]));
-    web.events = xQueueCreate(WEB_EVENT_QUEUE_LEN, sizeof(web_event_t));
+    web.html = web_malloc(WEB_HTML_MAX + 1U, "web.html");
+    web.lines = web_calloc(WEB_LINE_COUNT, sizeof(web.lines[0]), "web.lines");
+    web.links = web_calloc(WEB_LINK_COUNT, sizeof(web.links[0]), "web.links");
+    web.controls = web_calloc(WEB_CONTROL_COUNT, sizeof(web.controls[0]), "web.controls");
+    web.forms = web_calloc(WEB_FORM_COUNT, sizeof(web.forms[0]), "web.forms");
+    web.images = web_calloc(WEB_IMAGE_COUNT, sizeof(web.images[0]), "web.images");
+    web.items = web_calloc(WEB_ITEM_COUNT, sizeof(web.items[0]), "web.items");
+    web.events = solar_os_queue_create(WEB_EVENT_QUEUE_LEN,
+                                        sizeof(web_event_t));
 
     if (web.html == NULL ||
         web.lines == NULL ||
@@ -383,38 +417,38 @@ static bool web_allocate_buffers(void)
 static void web_free_buffers(void)
 {
     if (web.events != NULL) {
-        vQueueDelete(web.events);
+        solar_os_queue_delete(web.events);
         web.events = NULL;
     }
     if (web.html != NULL) {
-        heap_caps_free(web.html);
+        solar_os_memory_free(web.html);
         web.html = NULL;
     }
     if (web.lines != NULL) {
-        heap_caps_free(web.lines);
+        solar_os_memory_free(web.lines);
         web.lines = NULL;
     }
     if (web.links != NULL) {
-        heap_caps_free(web.links);
+        solar_os_memory_free(web.links);
         web.links = NULL;
     }
     if (web.controls != NULL) {
-        heap_caps_free(web.controls);
+        solar_os_memory_free(web.controls);
         web.controls = NULL;
     }
     if (web.forms != NULL) {
-        heap_caps_free(web.forms);
+        solar_os_memory_free(web.forms);
         web.forms = NULL;
     }
     if (web.images != NULL) {
         for (size_t i = 0; i < WEB_IMAGE_COUNT; i++) {
             web_free_image_data(&web.images[i]);
         }
-        heap_caps_free(web.images);
+        solar_os_memory_free(web.images);
         web.images = NULL;
     }
     if (web.items != NULL) {
-        heap_caps_free(web.items);
+        solar_os_memory_free(web.items);
         web.items = NULL;
     }
 }
@@ -439,18 +473,18 @@ static bool web_append_html(const uint8_t *data, size_t len)
     return true;
 }
 
-static bool web_http_event_is_redirect_body(esp_http_client_event_t *event)
+static bool web_http_event_is_redirect_body(const solar_os_http_event_t *event)
 {
-    if (event == NULL || event->client == NULL) {
+    if (event == NULL) {
         return false;
     }
 
-    const int status = esp_http_client_get_status_code(event->client);
-    return status >= 300 && status < 400;
+    return event->status_code >= 300 && event->status_code < 400;
 }
 
-static esp_err_t web_http_event(esp_http_client_event_t *event)
+static esp_err_t web_http_event(const solar_os_http_event_t *event, void *user_data)
 {
+    (void)user_data;
     if (event == NULL) {
         return ESP_OK;
     }
@@ -458,11 +492,11 @@ static esp_err_t web_http_event(esp_http_client_event_t *event)
         return ESP_FAIL;
     }
 
-    if (event->event_id == HTTP_EVENT_ON_DATA) {
+    if (event->type == SOLAR_OS_HTTP_EVENT_DATA) {
         if (web_http_event_is_redirect_body(event)) {
             return ESP_OK;
         }
-        web_append_html((const uint8_t *)event->data, (size_t)event->data_len);
+        web_append_html(event->data, event->data_len);
     }
     return ESP_OK;
 }
@@ -1448,7 +1482,7 @@ typedef struct {
     char redirect_url[WEB_URL_MAX];
 } web_fetch_buffer_t;
 
-static esp_err_t web_fetch_event(esp_http_client_event_t *event)
+static esp_err_t web_fetch_event(const solar_os_http_event_t *event, void *user_data)
 {
     if (event == NULL) {
         return ESP_OK;
@@ -1456,29 +1490,29 @@ static esp_err_t web_fetch_event(esp_http_client_event_t *event)
     if (web.stop_requested) {
         return ESP_FAIL;
     }
-    if (event->event_id == HTTP_EVENT_ON_HEADER) {
-        web_fetch_buffer_t *buffer = (web_fetch_buffer_t *)event->user_data;
+    if (event->type == SOLAR_OS_HTTP_EVENT_HEADER) {
+        web_fetch_buffer_t *buffer = user_data;
         if (buffer != NULL &&
-            event->header_key != NULL &&
+            event->header_name != NULL &&
             event->header_value != NULL &&
-            strcasecmp(event->header_key, "Location") == 0) {
+            strcasecmp(event->header_name, "Location") == 0) {
             strlcpy(buffer->redirect_url, event->header_value, sizeof(buffer->redirect_url));
         }
         return ESP_OK;
     }
-    if (event->event_id != HTTP_EVENT_ON_DATA) {
+    if (event->type != SOLAR_OS_HTTP_EVENT_DATA) {
         return ESP_OK;
     }
     if (web_http_event_is_redirect_body(event)) {
         return ESP_OK;
     }
 
-    web_fetch_buffer_t *buffer = (web_fetch_buffer_t *)event->user_data;
-    if (buffer == NULL || buffer->data == NULL || event->data == NULL || event->data_len <= 0) {
+    web_fetch_buffer_t *buffer = user_data;
+    if (buffer == NULL || buffer->data == NULL || event->data == NULL || event->data_len == 0) {
         return ESP_OK;
     }
 
-    const size_t len = (size_t)event->data_len;
+    const size_t len = event->data_len;
     const size_t remaining = buffer->max_len - buffer->len;
     const size_t copy_len = len < remaining ? len : remaining;
     if (copy_len > 0) {
@@ -1516,7 +1550,7 @@ static esp_err_t web_fetch_bytes(const char *url,
         return ESP_ERR_INVALID_SIZE;
     }
 
-    uint8_t *data = web_malloc(max_len);
+    uint8_t *data = web_malloc(max_len, "web.fetch");
     if (data == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -1532,32 +1566,30 @@ static esp_err_t web_fetch_bytes(const char *url,
         buffer.truncated = false;
         buffer.redirect_url[0] = '\0';
 
-        esp_http_client_config_t config = {
+        const solar_os_http_request_options_t options = {
             .url = current_url,
-            .method = HTTP_METHOD_GET,
+            .method = SOLAR_OS_HTTP_METHOD_GET,
             .timeout_ms = WEB_TIMEOUT_MS,
-            .disable_auto_redirect = true,
+            .follow_redirects = false,
             .event_handler = web_fetch_event,
-            .buffer_size = 1024,
-            .buffer_size_tx = 512,
+            .receive_buffer_size = 1024,
+            .transmit_buffer_size = 512,
             .user_agent = "SolarOS-web/0.1",
             .user_data = &buffer,
         };
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-        config.crt_bundle_attach = esp_crt_bundle_attach;
-#endif
 
-        esp_http_client_handle_t client = esp_http_client_init(&config);
-        if (client == NULL) {
-            heap_caps_free(data);
-            return ESP_ERR_NO_MEM;
+        solar_os_http_request_t *request = NULL;
+        err = solar_os_http_request_create(&options, &request);
+        if (err != ESP_OK) {
+            solar_os_memory_free(data);
+            return err;
         }
 
-        web.client = client;
-        err = esp_http_client_perform(client);
-        status = esp_http_client_get_status_code(client);
-        web.client = NULL;
-        esp_http_client_cleanup(client);
+        web_publish_request(request);
+        solar_os_http_response_t response;
+        err = solar_os_http_request_perform(request, &response);
+        status = response.status_code;
+        web_release_request(request);
 
         if (out_status != NULL) {
             *out_status = status;
@@ -1572,7 +1604,7 @@ static esp_err_t web_fetch_bytes(const char *url,
             buffer.redirect_url[0] != '\0') {
             char next_url[WEB_URL_MAX];
             if (!web_resolve_url(current_url, buffer.redirect_url, next_url, sizeof(next_url))) {
-                heap_caps_free(data);
+                solar_os_memory_free(data);
                 return ESP_FAIL;
             }
             SOLAR_OS_LOGI(TAG, "redirect %d: %s -> %s", status, current_url, next_url);
@@ -1590,11 +1622,11 @@ static esp_err_t web_fetch_bytes(const char *url,
         *out_truncated = buffer.truncated;
     }
     if (err != ESP_OK) {
-        heap_caps_free(data);
+        solar_os_memory_free(data);
         return err;
     }
     if (status < 200 || status >= 300 || buffer.truncated) {
-        heap_caps_free(data);
+        solar_os_memory_free(data);
         return ESP_FAIL;
     }
 
@@ -1891,7 +1923,7 @@ static void web_load_images(void)
         }
 
         err = web_decode_image_bytes(image, data, len, resolved);
-        heap_caps_free(data);
+        solar_os_memory_free(data);
         if (err != ESP_OK) {
             continue;
         }
@@ -1960,12 +1992,12 @@ static esp_err_t web_load_direct_image_document(uint32_t *out_bytes,
                       truncated ? "yes" : "no",
                       (unsigned)WEB_IMAGE_MAX_BYTES,
                       web.url);
-        heap_caps_free(data);
+        solar_os_memory_free(data);
         return err;
     }
 
     err = web_build_image_document(data, len, web.url);
-    heap_caps_free(data);
+    solar_os_memory_free(data);
     return err;
 }
 
@@ -1980,7 +2012,7 @@ static void web_task(void *arg)
         web.html[0] = '\0';
     }
 
-    esp_http_client_handle_t client = NULL;
+    solar_os_http_request_t *request = NULL;
     if (web_url_looks_like_image(web.url)) {
         web_send_message(WEB_EVENT_STATUS, "image");
         uint32_t bytes_read = 0;
@@ -2009,30 +2041,31 @@ static void web_task(void *arg)
         goto done;
     }
 
-    esp_http_client_config_t config = {
+    const solar_os_http_request_options_t options = {
         .url = web.url,
-        .method = HTTP_METHOD_GET,
+        .method = SOLAR_OS_HTTP_METHOD_GET,
         .timeout_ms = WEB_TIMEOUT_MS,
-        .disable_auto_redirect = false,
+        .follow_redirects = true,
+        .max_redirects = WEB_REDIRECT_MAX,
         .event_handler = web_http_event,
-        .buffer_size = 1024,
-        .buffer_size_tx = 512,
+        .receive_buffer_size = 1024,
+        .transmit_buffer_size = 512,
         .user_agent = "SolarOS-web/0.1",
     };
-#if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
-    config.crt_bundle_attach = esp_crt_bundle_attach;
-#endif
 
     SOLAR_OS_LOGI(TAG, "GET %s", web.url);
-    client = esp_http_client_init(&config);
-    if (client == NULL) {
+    esp_err_t err = solar_os_http_request_create(&options, &request);
+    if (err != ESP_OK) {
         web_send_message(WEB_EVENT_ERROR, "HTTP client init failed");
         goto done;
     }
-    web.client = client;
+    web_publish_request(request);
 
-    const esp_err_t err = esp_http_client_perform(client);
-    web.status_code = esp_http_client_get_status_code(client);
+    solar_os_http_response_t response;
+    err = solar_os_http_request_perform(request, &response);
+    web.status_code = response.status_code;
+    web_release_request(request);
+    request = NULL;
 
     if (web.stop_requested) {
         web_send_message(WEB_EVENT_ERROR, "cancelled");
@@ -2077,15 +2110,12 @@ static void web_task(void *arg)
     }
 
 done:
-    if (client != NULL) {
-        web.client = NULL;
-        esp_http_client_cleanup(client);
-    }
+    web_release_request(request);
     SOLAR_OS_LOGD(TAG,
                   "task done stack_high_water=%u",
                   (unsigned)uxTaskGetStackHighWaterMark(NULL));
     web.task_done = true;
-    vTaskDelete(NULL);
+    solar_os_task_delete(NULL);
 }
 
 static int web_body_height(solar_os_gfx_t *gfx)
@@ -2742,13 +2772,14 @@ static esp_err_t web_start_load(solar_os_context_t *ctx, const char *url, bool p
     web.redraw = true;
     web_render(ctx);
 
-    const BaseType_t created = xTaskCreatePinnedToCore(web_task,
-                                                       "solar_os_web",
-                                                       WEB_TASK_STACK,
-                                                       NULL,
-                                                       WEB_TASK_PRIORITY,
-                                                       &web.task,
-                                                       tskNO_AFFINITY);
+    const BaseType_t created = solar_os_task_create_pinned(
+        web_task,
+        "solar_os_web",
+        WEB_TASK_STACK,
+        NULL,
+        WEB_TASK_PRIORITY,
+        &web.task,
+        tskNO_AFFINITY);
     if (created != pdPASS) {
         web.task = NULL;
         web.task_done = true;
@@ -3106,9 +3137,7 @@ static esp_err_t web_start(solar_os_context_t *ctx)
 static void web_stop(solar_os_context_t *ctx)
 {
     web.stop_requested = true;
-    if (web.client != NULL) {
-        (void)esp_http_client_cancel_request(web.client);
-    }
+    web_cancel_request();
     if (!solar_os_task_wait_done(web.task, &web.task_done, SOLAR_OS_TASK_STOP_WAIT_MS)) {
         SOLAR_OS_LOGW(TAG, "web task did not stop within %u ms",
                       (unsigned)SOLAR_OS_TASK_STOP_WAIT_MS);

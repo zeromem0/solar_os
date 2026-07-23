@@ -9,7 +9,6 @@
 #include <string.h>
 
 #include "esp_err.h"
-#include "esp_heap_caps.h"
 #include "esp_netif.h"
 #include "esp_netif_net_stack.h"
 #include "freertos/FreeRTOS.h"
@@ -24,6 +23,7 @@
 #include "solar_os_log.h"
 #include "solar_os_memory.h"
 #include "solar_os_port.h"
+#include "solar_os_task.h"
 #include "solar_os_uart.h"
 
 #define SLIP_JOB_TASK_STACK 6144
@@ -625,7 +625,7 @@ static void slip_cleanup(void)
     }
 
     if (slip_job.frame != NULL) {
-        heap_caps_free(slip_job.frame);
+        solar_os_memory_free(slip_job.frame);
         slip_job.frame = NULL;
     }
 
@@ -694,7 +694,7 @@ static void slip_task(void *arg)
                   slip_job.tx_errors);
 
     slip_cleanup();
-    vTaskDelete(NULL);
+    solar_os_task_delete(NULL);
 }
 
 static esp_err_t slip_job_start(solar_os_context_t *ctx, int argc, char **argv)
@@ -723,7 +723,9 @@ static esp_err_t slip_job_start(solar_os_context_t *ctx, int argc, char **argv)
         return err;
     }
 
-    slip_job.frame = solar_os_psram_malloc(SLIP_JOB_FRAME_SIZE);
+    slip_job.frame = solar_os_memory_alloc(SLIP_JOB_FRAME_SIZE,
+                                           SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                           "slip.frame");
     if (slip_job.frame == NULL) {
         slip_cleanup();
         return ESP_ERR_NO_MEM;
@@ -763,12 +765,13 @@ static esp_err_t slip_job_start(solar_os_context_t *ctx, int argc, char **argv)
                                       network,
                                       "ipv4");
 
-    if (xTaskCreate(slip_task,
-                    "slip_job",
-                    SLIP_JOB_TASK_STACK,
-                    NULL,
-                    SLIP_JOB_TASK_PRIORITY,
-                    &slip_job.task) != pdPASS) {
+    if (solar_os_task_create_pinned(slip_task,
+                                    "slip_job",
+                                    SLIP_JOB_TASK_STACK,
+                                    NULL,
+                                    SLIP_JOB_TASK_PRIORITY,
+                                    &slip_job.task,
+                                    tskNO_AFFINITY) != pdPASS) {
         slip_cleanup();
         return ESP_ERR_NO_MEM;
     }

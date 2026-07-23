@@ -11,12 +11,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "esp_heap_caps.h"
 #include "solar_os_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "libssh2.h"
+#include "solar_os_memory.h"
+#include "solar_os_queue.h"
 #include "solar_os_ssh_transport.h"
 #include "solar_os_task.h"
 
@@ -164,11 +165,11 @@ static void scp_session_destroy(solar_os_scp_session_t *session)
     }
 
     if (session->events != NULL) {
-        vQueueDelete(session->events);
+        solar_os_queue_delete(session->events);
         session->events = NULL;
     }
     memset(session->password, 0, sizeof(session->password));
-    heap_caps_free(session);
+    solar_os_memory_free(session);
 }
 
 static int scp_wait_socket(solar_os_scp_session_t *session,
@@ -646,11 +647,9 @@ static void scp_close_channel(solar_os_scp_session_t *session,
 
 static char *scp_alloc_buffer(void)
 {
-    char *buffer = heap_caps_malloc(SOLAR_OS_SCP_BUFFER_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer == NULL) {
-        buffer = heap_caps_malloc(SOLAR_OS_SCP_BUFFER_SIZE, MALLOC_CAP_8BIT);
-    }
-    return buffer;
+    return solar_os_memory_alloc(SOLAR_OS_SCP_BUFFER_SIZE,
+                                 SOLAR_OS_MEMORY_TRANSIENT,
+                                 "scp.buffer");
 }
 
 static esp_err_t scp_upload(solar_os_scp_session_t *session,
@@ -720,7 +719,7 @@ static esp_err_t scp_upload(solar_os_scp_session_t *session,
         }
     }
 
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
     fclose(file);
     scp_close_channel(session, lib_session, channel, socket_fd);
     return scp_should_stop(session) ? ESP_ERR_INVALID_STATE : ret;
@@ -799,7 +798,7 @@ static esp_err_t scp_download(solar_os_scp_session_t *session,
         scp_send_error(session, "local file close failed");
         ret = ESP_FAIL;
     }
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
     scp_close_channel(session, lib_session, channel, socket_fd);
 
     if (ret != ESP_OK || scp_should_stop(session)) {
@@ -1067,7 +1066,7 @@ static esp_err_t scp_download_glob(solar_os_scp_session_t *session,
     }
 
 done:
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
     scp_close_channel(session, lib_session, channel, socket_fd);
     return scp_should_stop(session) ? ESP_ERR_INVALID_STATE : ret;
 }
@@ -1127,7 +1126,7 @@ done:
     }
 
     SOLAR_OS_LOGI(TAG, "SCP task stopped");
-    vTaskDelete(NULL);
+    solar_os_task_delete_internal(NULL);
 }
 
 esp_err_t solar_os_scp_start(const solar_os_scp_config_t *config,
@@ -1146,8 +1145,10 @@ esp_err_t solar_os_scp_start(const solar_os_scp_config_t *config,
         return ESP_ERR_INVALID_ARG;
     }
 
-    solar_os_scp_session_t *session =
-        heap_caps_calloc(1, sizeof(*session), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    solar_os_scp_session_t *session = solar_os_memory_calloc(1,
+                                                             sizeof(*session),
+                                                             SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                                             "scp.session");
     if (session == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -1171,19 +1172,21 @@ esp_err_t solar_os_scp_start(const solar_os_scp_config_t *config,
              session->remote_path,
              session->password[0] != '\0' ? "yes" : "no");
 
-    session->events = xQueueCreate(SOLAR_OS_SCP_EVENT_QUEUE_LEN, sizeof(solar_os_scp_event_t));
+    session->events = solar_os_queue_create(SOLAR_OS_SCP_EVENT_QUEUE_LEN,
+                                             sizeof(solar_os_scp_event_t));
     if (session->events == NULL) {
         solar_os_scp_stop(session);
         return ESP_ERR_NO_MEM;
     }
 
-    BaseType_t created = xTaskCreatePinnedToCore(scp_session_task,
-                                                 "solar_os_scp",
-                                                 SOLAR_OS_SCP_TASK_STACK,
-                                                 session,
-                                                 SOLAR_OS_SCP_TASK_PRIORITY,
-                                                 &session->task,
-                                                 tskNO_AFFINITY);
+    BaseType_t created = solar_os_task_create_pinned_internal(
+        scp_session_task,
+        "solar_os_scp",
+        SOLAR_OS_SCP_TASK_STACK,
+        session,
+        SOLAR_OS_SCP_TASK_PRIORITY,
+        &session->task,
+        tskNO_AFFINITY);
     if (created != pdPASS) {
         solar_os_scp_stop(session);
         return ESP_ERR_NO_MEM;

@@ -28,6 +28,9 @@ available. Optional startup and alias files:
 /.shell/hostname
 ```
 
+`/.shell/startup` runs once per boot on the first startup-enabled shell. Shell
+sessions created by that script do not run it again.
+
 The display-shell app exit chord is `CTRL+ALT+DEL`. Port shells use `Ctrl+]`.
 
 ## Shell Control
@@ -42,6 +45,19 @@ The display-shell app exit chord is `CTRL+ALT+DEL`. Port shells use `Ctrl+]`.
 | `sessions` | `sessions` | List display app sessions, display shell sessions, and port shell sessions. |
 | `fg` | `fg <session-id>` | Resume a display app or display shell session. |
 | `close` | `close <session-id>` | Close a display app or display shell session, or stop a port shell session. |
+| `inbox` | `inbox` | Open the universal incoming-message browser. |
+| `inbox` | `inbox status` | Show universal incoming-message counts and storage status. |
+| `inbox` | `inbox list [all\|unread]` | List newest messages first. |
+| `inbox` | `inbox read <id>` | Print one message and mark it read. |
+| `inbox` | `inbox clear` | Remove every message. |
+| `inbox` | `inbox post <source> <message>` | Post a message from a shell script or for testing. |
+| `email` | `email` | Open the receive-only email app. |
+| `email` | `email status` | Show saved account, local message counts, and last sync error. |
+| `email` | `email configure <imaps://host[:port]> <user> <password> [mailbox]` | Save an IMAPS account; the default mailbox is `INBOX`. |
+| `email` | `email sync` | Start a one-shot mailbox synchronization. |
+| `email` | `email forget` | Remove the saved account and local email list. |
+| `pocsag` | `pocsag status` | Show POCSAG receiver configuration, counters, correction statistics, and RSSI. |
+| `pocsag` | `pocsag send <radio> <frequency-hz> <baud> <ric> <message> [alpha\|numeric] [normal\|inverted] [function]` | Encode and transmit one POCSAG page. |
 
 Sessions are foreground application state plus shell instances attached to a
 display target or byte-stream port. Background services such as log followers,
@@ -59,18 +75,37 @@ name command-or-app fixed-args...
 
 Arguments typed after the alias are appended.
 
+The inbox is a persistent, producer-neutral message sink. Radio decoders,
+background chat or mail jobs, and shell scripts publish messages with a source,
+optional topic/sender/title, priority, timestamp, and body. New messages are
+unread by default. The status bar shows an envelope and unread count; reading or
+clearing messages durably updates that count. The newest 64 messages are kept in
+PSRAM when available and mirrored by a fixed-size ring at
+`/.inbox/messages.bin`; its compiled maximum is below 32 KB, so systems using
+the 64 KB internal flash volume cannot grow the inbox without bound. Replayed
+mail and chat notifications retain their existing read state. The browser shows
+newest messages first; opening a message marks the shared entry read.
+
+Email configuration is saved in NVS and deliberately has no compiled remote
+server or account default. Only `imaps://` endpoints are accepted, with TLS
+certificate validation enabled. Use a provider-specific app password where
+available. The password is supplied as a shell argument and stored with the
+device configuration, so treat shell history and physical access to the device
+as sensitive. `email sync` performs one synchronization; use the `email-sync`
+job for periodic polling.
+
 ## System And Diagnostics
 
 | Command | Usage | Description |
 | --- | --- | --- |
-| `version` | `version` | Print SolarOS version, board, flavor, and package information. |
+| `version` | `version` | Print the SolarOS version and firmware flavor. |
 | `pkg` | `pkg` | Print compiled package groups and build units. |
 | `board` | `board` | Print board ID, name, and capabilities. |
 | `engine` | `engine [status|reset]` | Print or reset generic engine utilization counters for CPU/SIMD-style backends and vector bulk operations. |
 | `display` | `display [list]`; `display test <target>`; `display mode <target> [mode]` | List drawable display targets, draw a test pattern, or change driver-specific display settings. |
 | `status` | `status` | Print a compact system status summary. |
 | `uptime` | `uptime` | Print elapsed time since boot. |
-| `mem` | `mem` | Print internal RAM, PSRAM, and DMA memory status. |
+| `mem` | `mem [policy]` | Print heap status; `policy` also shows allocation-class counters, guarded fallback limits, and the last tagged failure. |
 | `top` | `top` | Print FreeRTOS task resource information when available. |
 | `sleep` | `sleep` | Enter explicit light sleep. |
 | `power` | See below | Inspect and configure power policy. |
@@ -156,8 +191,14 @@ Columns:
 | `TICKS` | Number of dispatched tick events while running. |
 | `RES` | Number of resources currently recorded for the job. |
 
-Use `job status <name>` for the job summary, owner string, last error, and
-resource details. Job-owned resources use owner strings such as `job:log`; port
+Use `job status <name>` for the job summary, owner string, last error, effective
+tick interval/deadline, last and maximum handler time, deadline-miss count, and
+resource details. `sessions` prints the same timing telemetry for display and
+port sessions as one row per session in `ID TITLE APP STATE TIME` order. In the
+`TIME` column, the first pair is `interval/deadline` in milliseconds, the second
+is `last/max` in microseconds, `n` is the dispatch count, and `!` is the deadline
+miss count. Job timing detail uses the same values with explicit labels.
+Job-owned resources use owner strings such as `job:log`; port
 conflicts are reported as readable messages such as `job log owns cdc0`.
 
 Common job examples:
@@ -253,7 +294,7 @@ daq start /logs/key.csv gpio17 --changes
 daq start /logs/uart0.bin uart0 --raw --rate-ms 25
 ```
 
-`daq` CSV rows include `uptime_ms`, and include UTC `time_ms` when RTC time is
+`daq` CSV rows include `uptime_ms`, and include UTC `time_ms` when wall-clock time is
 trusted. Raw mode is byte-stream only, single-stream only, and writes bytes
 directly without CSV framing.
 
@@ -295,7 +336,7 @@ xfer recv <port> <file> --zmodem [--append|--replace]
 | `mqtt` | See below | MQTT/MQTTS client. |
 | `ping` | `ping <host> [count]` | Send ICMP echo requests. Without count, ping runs until app-exit. |
 | `netscan` | `netscan <host|range> [ports]` | Scan TCP ports on one host or a capped IPv4 range. |
-| `ntp` | `ntp [server]` | Sync RTC from NTP. |
+| `ntp` | `ntp [server]` | Sync the wall clock from NTP. |
 
 BLE GATT usage:
 
@@ -367,10 +408,17 @@ and writes the inactive ESP-IDF OTA partition.
 | `audio` | `audio loopback [ms] [volume]` | Run microphone-to-speaker loopback. |
 | `audio` | `audio off` | Stop audio output. |
 | `led` | `led [status|on|off|toggle]` | Inspect or control the built-in status LED when available. |
-| `expansion` | `expansion [status]` | Show expansion capabilities, connector resources, active devices, and resource claims. |
+| `expansion` | `expansion [status]` | Show expansion capabilities, named buses and leases, connector resources, active devices, and resource claims. |
 | `expansion` | `expansion scan` | List expansion resources and probe-capable drivers. |
 | `expansion` | `expansion drivers` | List compiled expansion drivers. |
 | `expansion` | `expansion devices` | List manually attached expansion devices. |
+| `expansion` | `expansion bus create i2c <name> port=<i2c0\|i2c1> sda=<gpio> scl=<gpio> [speed=<hz>]` | Define a runtime I2C bus on an unused controller and approved expansion pins. |
+| `expansion` | `expansion bus create onewire <name> pin=<gpio>` | Define a runtime named 1-Wire bus on an approved expansion pin. |
+| `expansion` | `expansion bus create spi <name> host=<spi2\|spi3> sclk=<gpio> mosi=<gpio> [miso=<gpio\|none>] cs=<gpio> [cs=<gpio> ...] [max=<bytes>]` | Define a runtime-routed SPI bus on a board-approved host and expansion pins. |
+| `expansion` | `expansion bus create uart <name> port=<uart1\|uart2> tx=<gpio> rx=<gpio> [baud=<rate>]` | Define a lazy runtime UART on an unused controller and approved expansion pins. |
+| `expansion` | `expansion bus attach <name>` | Attach a named detachable bus and reserve its endpoint and signal pins. |
+| `expansion` | `expansion bus detach <name>` | Detach an idle named bus, preserving its descriptor while releasing its endpoint and signal pins. |
+| `expansion` | `expansion bus remove <name>` | Remove an idle runtime bus and release its signal pins. |
 | `expansion` | `expansion attach <driver> <name> <resource...>` | Attach a compiled expansion driver or manual resource profile. |
 | `expansion` | `expansion detach <name>` | Detach an active expansion device and release its resource claims. |
 | `radio` | `radio` | Open the packet-radio TUI with live status and editable common config. |
@@ -380,71 +428,60 @@ and writes the inactive ESP-IDF OTA partition.
 | `radio` | `radio state <name> [sleep|standby|rx|tx]` | Show or change radio operating state. |
 | `radio` | `radio send <name> <text|byte...>` | Send one packet. |
 | `radio` | `radio recv <name> [timeout-ms]` | Receive one packet and print metadata plus payload. |
-| `uart` | `uart status` | Show UART service state. |
-| `uart` | `uart baud [rate]` | Show or set UART baud rate. |
-| `uart` | `uart mode [raw|line]` | Show or set UART service mode. |
-| `uart` | `uart write <text>` | Write text to `uart0` for diagnostics. |
-| `uart` | `uart read [ms]` | Read UART bytes for diagnostics. |
-| `gpio` | `gpio status` or `gpio list` | List runtime-accessible GPIOs. |
+| `pocsag` | `pocsag status` | Show detailed status for the POCSAG background receiver. |
+| `pocsag` | `pocsag send <radio> <frequency-hz> <baud> <ric> <message> [alpha\|numeric] [normal\|inverted] [function]` | Encode and transmit one POCSAG page. |
+| `uart` | `uart [status [bus]]` | Show the default `uart0` or a selected named UART bus. |
+| `uart` | `uart baud [bus] [rate]` | Show or set a named UART bus baud rate. |
+| `uart` | `uart mode [bus] [raw\|line]` | Show or set a named UART bus service mode. |
+| `uart` | `uart write [bus] <text>` | Write text through the default or selected named UART bus. |
+| `uart` | `uart read [bus] [ms]` | Read bytes from the default or selected named UART bus. |
+| `gpio` | `gpio status` or `gpio list` | List board GPIOs with free, releasable, or fixed pin policy. |
 | `gpio` | `gpio mode <pin> <in|out> [none|up|down]` | Configure a runtime GPIO. |
 | `gpio` | `gpio read <pin>` | Read a runtime GPIO. |
 | `gpio` | `gpio write <pin> <0|1>` | Write a runtime GPIO configured as output. |
-| `onewire` | `onewire reset <pin>` | Reset a 1-Wire bus and report device presence. |
-| `onewire` | `onewire scan <pin>` | Discover and list 1-Wire ROM addresses. |
-| `onewire` | `onewire xfer <pin> <read-len> [byte...]` | Reset, write bytes, then read bytes on a 1-Wire bus. |
+| `gpio` | `gpio release <pin>` | Reset a direct GPIO and release its resource claim for a bus or another service. |
+| `onewire` | `onewire [status [bus]]` | Show every registered named 1-Wire bus, or one selected bus. |
+| `onewire` | `onewire reset <bus\|pin>` | Reset a named bus or direct runtime GPIO and report presence. |
+| `onewire` | `onewire scan <bus\|pin>` | Discover and list 1-Wire ROM addresses. |
+| `onewire` | `onewire xfer <bus\|pin> <read-len> [byte...]` | Reset, write bytes, then read bytes on a 1-Wire target. |
 | `adc` | `adc status` | Show ADC service status. |
 | `adc` | `adc read <pin>` | Read an ADC-capable runtime pin. |
 | `pwm` | `pwm status` | Show PWM state. |
 | `pwm` | `pwm set <pin> <freq-hz> <duty-percent>` | Start LEDC PWM on a runtime pin. |
 | `pwm` | `pwm off <pin>` | Stop PWM on a pin. |
-| `i2c` | `i2c status` | Show I2C bus state. |
-| `i2c` | `i2c speed [hz]` | Show or set bus speed. |
-| `i2c` | `i2c scan` | Scan the I2C bus. |
-| `i2c` | `i2c probe <addr>` | Probe one address. |
-| `i2c` | `i2c read <addr> <reg> [len]` | Read bytes from a register. |
-| `i2c` | `i2c write <addr> <reg> <byte...>` | Write bytes to a register. |
-| `spi` | `spi [status]` | Show SPI bus pins and chip-select slots. |
-| `spi` | `spi xfer <cs> <mode> <hz> <byte...>` | Full-duplex SPI transfer. |
-| `spi` | `spi read <cs> <mode> <hz> <len> [fill]` | Read bytes over SPI. |
-| `spi` | `spi write <cs> <mode> <hz> <byte...>` | Write bytes over SPI. |
+| `i2c` | `i2c [status [bus]]` | Show every named I2C bus, or one selected bus. |
+| `i2c` | `i2c speed [bus]` | Show named-bus configuration; retained as a status alias. |
+| `i2c` | `i2c scan [bus]` | Scan a named bus; defaults to `i2c0`. |
+| `i2c` | `i2c probe [bus] <addr>` | Probe one address; defaults to `i2c0`. |
+| `i2c` | `i2c read [bus] <addr> <reg> [len]` | Read register bytes; defaults to `i2c0`. |
+| `i2c` | `i2c write [bus] <addr> <reg> <byte...>` | Write register bytes; defaults to `i2c0`. |
+| `spi` | `spi [status [bus]]` | Show every named SPI bus, or one selected bus. |
+| `spi` | `spi xfer <bus> <cs> <mode> <hz> <byte...>` | Full-duplex transfer over a named SPI bus. |
+| `spi` | `spi read <bus> <cs> <mode> <hz> <len> [fill]` | Read bytes over a named SPI bus. |
+| `spi` | `spi write <bus> <cs> <mode> <hz> <byte...>` | Write bytes over a named SPI bus. |
 | `irrig` | `irrig [status]` | Show irrigation zones, mode, schedules, and relay outputs. |
 | `irrig` | `irrig zones <1..8>` | Set the number of irrigation zones. |
 | `irrig` | `irrig mode <auto|manual>` | Select schedule-driven or manual relay control. |
 | `irrig` | `irrig on <zone>` / `irrig off <zone>` | Set a zone's manual switch (zones are letters `A`..). |
 | `irrig` | `irrig set <zone> <slot> <HH:MM> <HH:MM> <days> <A|->` | Program a schedule slot; days are 7 chars Monday-first, e.g. `LMMJV--`. |
 | `irrig` | `irrig pin <zone> <gpio|->` | Assign or clear a zone's relay GPIO (active-low). |
-| `date` | `date [YYYY-MM-DD]` | Show or set local RTC date. |
-| `time` | `time [HH:MM[:SS]]` | Show or set local RTC time. |
+| `date` | `date [YYYY-MM-DD]` | Show or set the local date. |
+| `time` | `time [HH:MM[:SS]]` | Show or set the local time. |
 | `temperature` | `temperature` | Read the board temperature sensor when available. |
 | `humidity` | `humidity` | Read the board humidity sensor when available. |
 
-Runtime GPIO access is board-filtered. On the Waveshare ESP32-S3-RLCD-4.2,
-runtime user GPIO access is intentionally limited to GPIO1, GPIO2, GPIO3, and
-GPIO17. On the Elecrow CrowPanel ESP32-S3 4.2-inch E-paper, runtime GPIO access
-is available on GPIO8, GPIO9, GPIO14, GPIO15, GPIO16, GPIO17, GPIO18, GPIO19,
-GPIO20, GPIO21, and GPIO38. GPIO3 is present on the expansion header but is
-blocked as a strapping pin. GPIO1/GPIO2/GPIO4/GPIO5/GPIO6 are controls,
-GPIO7/GPIO11/GPIO12/GPIO45-GPIO48 are display signals, GPIO10/GPIO13/
-GPIO39/GPIO40/GPIO42 are SD signals, GPIO41 is the status LED, and
-GPIO43/GPIO44 are `uart0` through the CH340C USB bridge. On the
-ESP32-S3-DevKitC-1-N16R8, runtime GPIO access is available on
-GPIO1, GPIO2, GPIO4, GPIO5, GPIO6, GPIO7, GPIO10, GPIO14, GPIO15, GPIO16,
-GPIO17, GPIO18, GPIO21, GPIO39, GPIO40, GPIO41, GPIO42, and GPIO47. The
-DevKitC I2C bus uses GPIO8/GPIO9, SPI uses GPIO12/GPIO13/GPIO11 with
-GPIO10/GPIO5/GPIO6/GPIO7 chip-select slots, GPIO19/GPIO20 are native USB,
-GPIO35-GPIO37 are reserved by N16R8 Octal PSRAM, GPIO43/GPIO44 are `uart0`,
-and GPIO0/GPIO3/GPIO45/GPIO46 are boot strapping pins. On ODROID-GO, runtime
-GPIO access is limited to GPIO4 and GPIO15; both are external IO pins and SPI
-chip-select slots. GPIO2 is the status LED, GPIO14 is the LCD backlight,
-GPIO25/GPIO26 are speaker amplifier/DAC pins, GPIO18/GPIO19/GPIO23 are VSPI,
-GPIO5/GPIO21 are TFT control pins, GPIO22 is SD card chip select, GPIO34/GPIO35
-are ADC D-pad axes, GPIO36 is battery ADC, GPIO39 is the board key input, and
-GPIO32/GPIO33/GPIO13/GPIO27/GPIO0 are built-in buttons.
+Board-specific connector resources, runtime GPIO policy, named buses, leases,
+and attachment examples are documented in [Expansion Ports](expansion.md).
+Use `expansion status` and `gpio list` for the authoritative view on a running
+device.
 
-The `onewire` command accepts any runtime-accessible GPIO. Every `xfer` starts
-with a 1-Wire reset, writes the supplied bytes, and then reads `read-len` bytes.
-For example, `onewire xfer 1 9 0xcc 0xbe` issues Skip ROM and Read Scratchpad,
-then reads a nine-byte scratchpad. ROM address bytes supplied to `xfer` use
+The `onewire` command accepts a registered bus name or any runtime-accessible
+GPIO. `onewire status` discovers named buses, while the numeric form preserves
+the direct-pin workflow. Every `xfer` starts with a 1-Wire reset, writes the
+supplied bytes, and then reads `read-len` bytes. For example,
+`onewire xfer 1 9 0xcc 0xbe` issues Skip ROM and Read Scratchpad, then reads a
+nine-byte scratchpad. The equivalent named form starts with
+`onewire xfer onewire0`. ROM address bytes supplied to `xfer` use
 least-significant-byte-first wire order. The service enables the ESP32 internal
 pull-up, but a 4.7 kohm external pull-up from the data line to 3.3 V is strongly
 recommended. The internal pull-up is not a parasite-power supply.
@@ -474,43 +511,6 @@ changed frame and after every 19 fast updates, while unchanged frames are
 skipped. `refresh=fast` forces the faster waveform and `refresh=full` forces the
 full waveform on every changed frame.
 
-Manual expansion profiles claim resources without initializing external
-hardware:
-
-```text
-expansion attach manual radio0 spi0 cs=gpio10 irq=gpio4 reset=gpio5
-expansion attach manual sensor0 i2c0 addr=0x40
-expansion detach radio0
-```
-
-RFM69 433 MHz packet radios can be attached as active expansion devices. Only
-`spi` and `cs` are required; `irq` and `reset` are optional:
-
-```text
-expansion attach rfm69 radio0 spi=spi0 cs=gpio10
-expansion attach rfm69 radio0 spi=spi0 cs=gpio10 irq=gpio4 reset=gpio5
-expansion detach radio0
-```
-
-PCD8544 84x48 SPI LCD modules can be attached as auxiliary display targets with
-the `pcd8544` driver. The driver
-requires an expansion SPI bus, a CS/CE pin, a DC pin, and a reset/RST pin. On
-the ESP32-S3 DevKitC-1 target:
-
-```text
-display pins: VCC->3V3 GND->GND CLK/SCLK->GPIO12 DIN/MOSI->GPIO11
-display pins: CE/CS->GPIO10 DC->GPIO4 RST->GPIO5
-expansion attach pcd8544 lcd0 spi=spi0 cs=gpio10 dc=gpio4 reset=gpio5
-display list
-display test lcd0
-```
-
-`ce=gpio10` is accepted as an alias for `cs=gpio10`, and `rst=gpio5` is
-accepted as an alias for `reset=gpio5`. If the module has an LED/backlight pin,
-wire it according to the module board; use suitable current limiting when tying
-it to 3V3. Boards without expansion SPI, such as the Waveshare RLCD target,
-will not compile the active `pcd8544` expansion driver.
-
 Packet radio devices are datagram endpoints registered by expansion drivers, not
 byte-stream ports. The common radio layer preserves packet metadata such as RSSI
 and optional source/destination IDs. Radio frequency values are Hz by default
@@ -522,6 +522,31 @@ radio config radio0 frequency 433MHz
 radio config radio0 modulation gfsk
 radio send radio0 hello
 radio recv radio0 5000
+```
+
+The POCSAG job configures an attached packet radio for one paging channel,
+filters addresses to one RIC, corrects up to two bad bits per BCH codeword, and
+publishes decoded pages to the universal inbox. Consecutive POCSAG batches are
+kept in one message. For the 448.425 MHz test channel:
+
+```text
+job start pocsag radio 448425000 1200 1841525 alpha
+pocsag status
+inbox list unread
+```
+
+Use `inverted` as the final argument if the transmitter and receiver use
+opposite FSK mark/space polarity. Stopping the job restores the radio's previous
+configuration and state.
+
+To transmit a page, stop the receiver when it uses the same half-duplex radio,
+then send the message. Alphanumeric pages default to function 3; numeric pages
+default to function 0. The optional final argument selects function 0 through 3.
+The previous radio configuration and state are restored after transmission.
+
+```text
+job stop pocsag
+pocsag send radio 448425000 1200 1841525 "SolarOS calling" alpha inverted
 ```
 
 ## Quick Examples

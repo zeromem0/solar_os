@@ -12,13 +12,14 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "solar_os_app_registry.h"
 #include "solar_os_keys.h"
+#include "solar_os_memory.h"
 #include "solar_os_shell.h"
 #include "solar_os_storage.h"
+#include "solar_os_task.h"
 #include "solar_os_terminal.h"
 #include "solar_os_tui.h"
 #include "solar_os_zip.h"
@@ -90,16 +91,15 @@ static void files_set_message(const char *message);
 
 static void *files_realloc(void *ptr, size_t size)
 {
-    void *next = heap_caps_realloc(ptr, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (next == NULL) {
-        next = heap_caps_realloc(ptr, size, MALLOC_CAP_8BIT);
-    }
-    return next;
+    return solar_os_memory_realloc(ptr,
+                                   size,
+                                   SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                   "files.entries");
 }
 
 static void files_free(void *ptr)
 {
-    heap_caps_free(ptr);
+    solar_os_memory_free(ptr);
 }
 
 static files_pane_t *files_active_pane(void)
@@ -1051,26 +1051,18 @@ static bool files_source_list_alloc(files_source_list_t *list, size_t capacity)
 {
     memset(list, 0, sizeof(*list));
     list->capacity = capacity > 0 ? capacity : 1U;
-    list->sources = heap_caps_calloc(list->capacity,
-                                     sizeof(*list->sources),
-                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (list->sources == NULL) {
-        list->sources = heap_caps_calloc(list->capacity,
-                                         sizeof(*list->sources),
-                                         MALLOC_CAP_8BIT);
-    }
-    list->paths = heap_caps_calloc(list->capacity,
-                                   sizeof(*list->paths),
-                                   MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (list->paths == NULL) {
-        list->paths = heap_caps_calloc(list->capacity,
-                                       sizeof(*list->paths),
-                                       MALLOC_CAP_8BIT);
-    }
+    list->sources = solar_os_memory_calloc(list->capacity,
+                                           sizeof(*list->sources),
+                                           SOLAR_OS_MEMORY_TRANSIENT,
+                                           "files.zip-src");
+    list->paths = solar_os_memory_calloc(list->capacity,
+                                         sizeof(*list->paths),
+                                         SOLAR_OS_MEMORY_TRANSIENT,
+                                         "files.zip-path");
 
     if (list->sources == NULL || list->paths == NULL) {
-        heap_caps_free(list->sources);
-        heap_caps_free(list->paths);
+        solar_os_memory_free(list->sources);
+        solar_os_memory_free(list->paths);
         memset(list, 0, sizeof(*list));
         return false;
     }
@@ -1083,8 +1075,8 @@ static void files_source_list_free(files_source_list_t *list)
         return;
     }
 
-    heap_caps_free(list->sources);
-    heap_caps_free(list->paths);
+    solar_os_memory_free(list->sources);
+    solar_os_memory_free(list->paths);
     memset(list, 0, sizeof(*list));
 }
 
@@ -1173,7 +1165,7 @@ static void files_zip_task(void *arg)
                                           request->source_count,
                                           &options);
     request->done = true;
-    vTaskDelete(NULL);
+    solar_os_task_delete_internal(NULL);
 }
 
 static esp_err_t files_run_zip_task(files_zip_request_t *request)
@@ -1182,13 +1174,14 @@ static esp_err_t files_run_zip_task(files_zip_request_t *request)
     request->done = false;
     request->result = ESP_FAIL;
 
-    const BaseType_t created = xTaskCreatePinnedToCore(files_zip_task,
-                                                       "files_zip",
-                                                       FILES_ZIP_TASK_STACK,
-                                                       request,
-                                                       FILES_ZIP_TASK_PRIORITY,
-                                                       &task,
-                                                       tskNO_AFFINITY);
+    const BaseType_t created = solar_os_task_create_pinned_internal(
+        files_zip_task,
+        "files_zip",
+        FILES_ZIP_TASK_STACK,
+        request,
+        FILES_ZIP_TASK_PRIORITY,
+        &task,
+        tskNO_AFFINITY);
     if (created != pdPASS) {
         return ESP_ERR_NO_MEM;
     }

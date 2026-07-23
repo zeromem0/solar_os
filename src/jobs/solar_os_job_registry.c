@@ -13,6 +13,9 @@
 #if SOLAR_OS_PACKAGE_JOB_DAQ
 #include "solar_os_daq_job.h"
 #endif
+#if SOLAR_OS_PACKAGE_JOB_EMAIL_SYNC
+#include "solar_os_email_sync_job.h"
+#endif
 #if SOLAR_OS_PACKAGE_JOB_HTTPD
 #include "solar_os_httpd_job.h"
 #endif
@@ -22,11 +25,17 @@
 #if SOLAR_OS_PACKAGE_JOB_CHATD
 #include "solar_os_chatd_job.h"
 #endif
+#if SOLAR_OS_PACKAGE_JOB_CHAT_SYNC
+#include "solar_os_chat_sync_job.h"
+#endif
 #if SOLAR_OS_PACKAGE_JOB_LOG
 #include "solar_os_log_job.h"
 #endif
 #if SOLAR_OS_PACKAGE_JOB_NTP_SYNC
 #include "solar_os_ntp_sync_job.h"
+#endif
+#if SOLAR_OS_PACKAGE_JOB_POCSAG
+#include "solar_os_pocsag_job.h"
 #endif
 #if SOLAR_OS_PACKAGE_JOB_REMOTE
 #include "solar_os_remote_job.h"
@@ -48,6 +57,9 @@ static const solar_os_job_registry_entry_t registered_jobs[] = {
 #if SOLAR_OS_PACKAGE_JOB_DAQ
     {"daq", "capture data streams to CSV", &solar_os_daq_job},
 #endif
+#if SOLAR_OS_PACKAGE_JOB_EMAIL_SYNC
+    {"email-sync", "periodic IMAP email synchronization", &solar_os_email_sync_job},
+#endif
 #if SOLAR_OS_PACKAGE_JOB_HTTPD
     {"httpd", "static HTTP file server", &solar_os_httpd_job},
 #endif
@@ -57,11 +69,17 @@ static const solar_os_job_registry_entry_t registered_jobs[] = {
 #if SOLAR_OS_PACKAGE_JOB_CHATD
     {"chatd", "local chat gateway server", &solar_os_chatd_job},
 #endif
+#if SOLAR_OS_PACKAGE_JOB_CHAT_SYNC
+    {"chat-sync", "synchronize chat transports and inbox notifications", &solar_os_chat_sync_job},
+#endif
 #if SOLAR_OS_PACKAGE_JOB_LOG
     {"log", "stream SolarOS logs to a port or file", &solar_os_log_job},
 #endif
 #if SOLAR_OS_PACKAGE_JOB_NTP_SYNC
     {"ntp-sync", "periodic RTC NTP sync", &solar_os_ntp_sync_job},
+#endif
+#if SOLAR_OS_PACKAGE_JOB_POCSAG
+    {"pocsag", "POCSAG pager receiver", &solar_os_pocsag_job},
 #endif
 #if SOLAR_OS_PACKAGE_JOB_REMOTE
     {"remote", "web screen share + keyboard: job start remote [port]", &solar_os_remote_job},

@@ -12,17 +12,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
-#include "solar_os_chat.h"
+#include "solar_os_chat_protocol.h"
 #include "solar_os_jobs.h"
 #include "solar_os_log.h"
 #include "solar_os_memory.h"
 #include "solar_os_storage.h"
+#include "solar_os_task.h"
 
 #define CHATD_DEFAULT_PORT 7777U
 #define CHATD_MAX_CLIENTS 6U
@@ -1283,20 +1283,20 @@ static void chatd_free_buffers(chatd_job_state_t *state)
     }
     for (size_t i = 0; i < CHATD_MAX_CLIENTS; i++) {
         if (state->clients[i].line != NULL) {
-            heap_caps_free(state->clients[i].line);
+            solar_os_memory_free(state->clients[i].line);
             state->clients[i].line = NULL;
         }
     }
     if (state->tx_line != NULL) {
-        heap_caps_free(state->tx_line);
+        solar_os_memory_free(state->tx_line);
         state->tx_line = NULL;
     }
     if (state->text_arg != NULL) {
-        heap_caps_free(state->text_arg);
+        solar_os_memory_free(state->text_arg);
         state->text_arg = NULL;
     }
     if (state->history != NULL) {
-        heap_caps_free(state->history);
+        solar_os_memory_free(state->history);
         state->history = NULL;
     }
 }
@@ -1374,7 +1374,7 @@ static void chatd_job_task(void *arg)
     state->running = false;
     state->stop_requested = false;
     state->task = NULL;
-    vTaskDelete(NULL);
+    solar_os_task_delete_internal(NULL);
 }
 
 static bool chatd_parse_port(const char *text, uint16_t *port)
@@ -1507,15 +1507,24 @@ static void chatd_open_history_dump(chatd_job_state_t *state, const char *path)
 
 static esp_err_t chatd_alloc_buffers(chatd_job_state_t *state)
 {
-    state->tx_line = solar_os_psram_malloc(CHATD_LINE_MAX);
-    state->text_arg = solar_os_psram_malloc(SOLAR_OS_CHAT_TEXT_MAX);
-    state->history = solar_os_psram_calloc(CHATD_HISTORY_COUNT, sizeof(chatd_history_entry_t));
+    state->tx_line = solar_os_memory_alloc(CHATD_LINE_MAX,
+                                           SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                           "chatd.tx");
+    state->text_arg = solar_os_memory_alloc(SOLAR_OS_CHAT_TEXT_MAX,
+                                            SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                            "chatd.text");
+    state->history = solar_os_memory_calloc(CHATD_HISTORY_COUNT,
+                                            sizeof(chatd_history_entry_t),
+                                            SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                            "chatd.history");
     if (state->tx_line == NULL || state->text_arg == NULL || state->history == NULL) {
         chatd_free_buffers(state);
         return ESP_ERR_NO_MEM;
     }
     for (size_t i = 0; i < CHATD_MAX_CLIENTS; i++) {
-        state->clients[i].line = solar_os_psram_malloc(CHATD_LINE_MAX);
+        state->clients[i].line = solar_os_memory_alloc(CHATD_LINE_MAX,
+                                                       SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                                       "chatd.client");
         if (state->clients[i].line == NULL) {
             chatd_free_buffers(state);
             return ESP_ERR_NO_MEM;
@@ -1611,12 +1620,13 @@ static esp_err_t chatd_job_start(solar_os_context_t *ctx, int argc, char **argv)
     }
 
     chatd_job.running = true;
-    if (xTaskCreate(chatd_job_task,
-                    "chatd_job",
-                    CHATD_TASK_STACK,
-                    &chatd_job,
-                    CHATD_TASK_PRIORITY,
-                    &chatd_job.task) != pdPASS) {
+    if (solar_os_task_create_pinned_internal(chatd_job_task,
+                                             "chatd_job",
+                                             CHATD_TASK_STACK,
+                                             &chatd_job,
+                                             CHATD_TASK_PRIORITY,
+                                             &chatd_job.task,
+                                             tskNO_AFFINITY) != pdPASS) {
         chatd_close_all_sockets(&chatd_job);
         chatd_free_buffers(&chatd_job);
         chatd_job.running = false;

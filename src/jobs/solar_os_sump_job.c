@@ -14,6 +14,7 @@
 #include "solar_os_log.h"
 #include "solar_os_logic.h"
 #include "solar_os_port.h"
+#include "solar_os_task.h"
 
 #define SUMP_JOB_TASK_STACK 5120
 #define SUMP_JOB_TASK_PRIORITY (tskIDLE_PRIORITY + 3)
@@ -45,6 +46,7 @@ typedef struct {
     uint8_t pending_count;
     uint32_t captures;
     uint64_t uploaded_bytes;
+    uint32_t generation;
     esp_err_t last_error;
 } sump_job_state_t;
 
@@ -288,7 +290,9 @@ static void sump_task(void *arg)
 
     if (fatal_error != ESP_OK) {
         sump_job.last_error = fatal_error;
-        (void)solar_os_jobs_mark_stopped(solar_os_sump_job.name, fatal_error);
+        (void)solar_os_jobs_mark_stopped(solar_os_sump_job.name,
+                                         sump_job.generation,
+                                         fatal_error);
     }
     SOLAR_OS_LOGI(TAG,
                   "stopped: captures=%lu uploaded=%llu error=%s",
@@ -296,7 +300,7 @@ static void sump_task(void *arg)
                   (unsigned long long)sump_job.uploaded_bytes,
                   esp_err_to_name(sump_job.last_error));
     sump_cleanup();
-    vTaskDelete(NULL);
+    solar_os_task_delete_internal(NULL);
 }
 
 static bool sump_parse_pin(const char *text, uint8_t *pin)
@@ -376,6 +380,10 @@ static esp_err_t sump_start(solar_os_context_t *ctx, int argc, char **argv)
     if (err != ESP_OK) {
         return err;
     }
+    err = solar_os_jobs_get_generation(solar_os_sump_job.name, &sump_job.generation);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     solar_os_port_info_t info;
     err = solar_os_port_get_info(SUMP_JOB_PORT, &info);
@@ -411,12 +419,13 @@ static esp_err_t sump_start(solar_os_context_t *ctx, int argc, char **argv)
                                       "logic-gpio",
                                       pins);
 
-    if (xTaskCreate(sump_task,
-                    "sump_job",
-                    SUMP_JOB_TASK_STACK,
-                    NULL,
-                    SUMP_JOB_TASK_PRIORITY,
-                    &sump_job.task) != pdPASS) {
+    if (solar_os_task_create_pinned_internal(sump_task,
+                                             "sump_job",
+                                             SUMP_JOB_TASK_STACK,
+                                             NULL,
+                                             SUMP_JOB_TASK_PRIORITY,
+                                             &sump_job.task,
+                                             tskNO_AFFINITY) != pdPASS) {
         sump_cleanup();
         return ESP_ERR_NO_MEM;
     }

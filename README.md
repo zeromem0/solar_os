@@ -91,7 +91,9 @@ SOLAR_OS_FLAVOR=core pio run -e waveshare_esp32_s3_rlcd_4_2
 ```
 
 The running firmware reports its selected board, version, flavor, and package
-set through the `version` and `pkg` shell commands.
+set through the `version` and `pkg` shell commands. See
+[Firmware Packages and Flavors](doc/packages.md) for package ownership,
+dependency resolution, and custom flavor rules.
 
 ## First Commands
 
@@ -119,8 +121,10 @@ was compiled and what hardware is exposed.
 Detailed documentation split by topic:
 
 - [Shell commands](doc/commands.md)
+- [Expansion ports and external devices](doc/expansion.md)
 - [Foreground apps](doc/apps.md)
 - [Background jobs](doc/jobs.md)
+- [Service concurrency contract](doc/service-concurrency.md)
 - [Board targets and board support](doc/solar_os_boards.md)
 - [Python API](doc/solar_os_python.md)
 - [Lua API](doc/solar_os_lua.md)

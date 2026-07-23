@@ -42,7 +42,7 @@ Controls:
 
 ## chat
 
-Two-pane gateway chat client. The left pane lists channels, the right pane shows
+Two-pane chat client. The left pane lists channels, the right pane shows
 conversation history, and the bottom line is the message/command input.
 
 Usage:
@@ -50,6 +50,23 @@ Usage:
 ```text
 chat [gateway-url] [channel] [user] [token]
 ```
+
+The background `chat-sync` job owns the transport connection, retries, joined
+channels, and queued outbound messages. Start it explicitly with
+`job start chat-sync`, just like `email-sync`. Closing or suspending `chat` does
+not disconnect an already-running synchronizer. Incoming messages remain in the
+shared bounded chat store and publish bounded notifications to the universal
+inbox; reopening the app replays the retained store. With SD storage, full
+messages are retained under `/.chat/messages.bin`. On internal flash, Chat
+restores the compact message copy already retained in `/.inbox/messages.bin`,
+so it consumes no second flash ring. Both backends deduplicate transport replays
+by stable message identity and keep linked Inbox read state aligned.
+
+Unlike `email-sync`, `chat-sync` takes no interval argument: it waits for Wi-Fi
+and reconnects with exponential backoff while remaining in the running state.
+
+`/connect [url]` updates the saved gateway and enables synchronization.
+`/disconnect` pauses synchronization without stopping the job.
 
 In-app commands:
 
@@ -92,14 +109,19 @@ Controls:
 
 ## com
 
-Serial terminal for the expansion UART. BLE keyboard input is forwarded to the
-UART and UART RX is drawn in the terminal.
+Serial terminal for the expansion UART. Display-keyboard or port-shell input is
+forwarded to the UART, and UART RX is drawn in the active terminal.
 
 Usage:
 
 ```text
-com
+com [bus]
 ```
+
+The bus defaults to `uart0`. For example, `com gps` connects to an existing
+runtime UART bus named `gps`. The selected bus remains leased by the app until
+the session exits. `com` works from both display and port shells; when launched
+from a port shell, its terminal output is returned through that same port.
 
 Controls:
 
@@ -124,7 +146,8 @@ Controls:
 
 Text editor for files on mounted storage. It supports cursor navigation,
 selection, clipboard operations, text-size changes, and syntax highlighting for
-known source files.
+known source files. The editor supports files up to 256 KiB on boards with
+PSRAM and 32 KiB on boards without PSRAM.
 
 Usage:
 
@@ -159,6 +182,90 @@ Controls:
 - `Enter` opens directories or launches known files.
 - File operations refresh both panes after completion.
 - App-exit key exits.
+
+## inbox
+
+Universal incoming-message browser for pages, chat notifications, mail, and
+other background producers. It reads the same shared inbox that supplies the
+status-bar unread count. Messages and read state survive reboot in the bounded
+`/.inbox/messages.bin` store; the service retains at most 64 entries and keeps
+the file below 32 KB even when internal flash is the only storage.
+
+Each list item occupies exactly one terminal row: unread/priority markers,
+local reception date and time, a compact source (`chat/general`, `email`, or
+`pocsag`), and as much of the message body preview as fits the screen.
+
+Usage:
+
+```text
+inbox
+```
+
+Controls:
+
+- `Up`/`Down`, `Page Up`/`Page Down`, `Home`, and `End` navigate.
+- `Enter` or `Right` opens the selected message and marks it read.
+- `Left`, `Backspace`, or `Esc` returns from a message to the list.
+- `u` toggles the unread-only filter.
+- `m` toggles the selected message between read and unread.
+- `r` refreshes and `q` or the app-exit key exits.
+
+## email
+
+Receive-only IMAPS client for the configured mailbox. The app shows the
+provider-specific message list while every newly synchronized message is also
+published to the universal inbox and its shared status-bar unread counter.
+
+Configure and synchronize the account before opening the app:
+
+```text
+wifi on
+email configure imaps://imap.example.com user@example.com app-password INBOX
+email sync
+email
+```
+
+Controls:
+
+- `Up`/`Down`, `Page Up`/`Page Down`, `Home`, and `End` navigate.
+- `Enter` or `Right` opens the selected message and marks its universal inbox
+  notification read.
+- `Left`, `Backspace`, or `Esc` returns from a message to the list.
+- `u` toggles the unread-only filter.
+- `m` toggles the selected message between read and unread.
+- `r` refreshes and `q` or the app-exit key exits.
+
+The account configuration persists in NVS. The local message list is volatile
+and keeps the newest 32 synchronized messages. This first version displays a
+best-effort text preview; MIME attachments, encoded headers, sending, and
+server-side read flags are not implemented yet.
+
+## io
+
+Interactive expansion I/O manager. It presents the board's expansion pins,
+named buses, and resource claims in one TUI and uses the same ownership and
+validation services as the `gpio`, `i2c`, `spi`, `uart`, `onewire`, and
+`expansion` commands.
+
+Usage:
+
+```text
+io
+```
+
+Controls:
+
+- `Tab`, `Left`, and `Right` switch between Pins, Buses, and Claims.
+- Arrows, Page Up/Page Down, Home, and End navigate the selected view.
+- `Enter` opens context-sensitive actions for a pin or bus.
+- `n` creates a board-approved named I2C, SPI, UART, or 1-Wire bus.
+- Bus creation uses arrows to select fields and values; the generated bus name
+  can be edited directly.
+- Runtime buses can be attached, detached, or removed when their lease state
+  permits it. Their `Autostart` action idempotently appends the matching
+  `expansion bus create ...` command to `/.shell/startup`. Direct GPIO and PWM
+  assignments can be created and released from the Pins view.
+- `r` refreshes; `q`, `Esc`, or the app-exit key exits.
 
 ## invaders
 

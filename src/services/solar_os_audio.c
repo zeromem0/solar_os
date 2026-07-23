@@ -11,6 +11,7 @@
 
 #include "esp_heap_caps.h"
 #include "solar_os_log.h"
+#include "solar_os_memory.h"
 #include "solar_os_board_audio.h"
 #include "solar_os_board_caps.h"
 #include "esp_timer.h"
@@ -277,11 +278,9 @@ static esp_err_t audio_wav_read_info_from_file(FILE *file,
 #if SOLAR_OS_AUDIO_HAS_MP3
 static void *audio_heap_alloc(size_t size)
 {
-    void *ptr = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (ptr == NULL) {
-        ptr = heap_caps_malloc(size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    return ptr;
+    return solar_os_memory_alloc(size,
+                                 SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                 "audio.file");
 }
 
 static void audio_log_heap_nomem(const char *where, size_t bytes)
@@ -866,10 +865,9 @@ esp_err_t solar_os_audio_loopback(uint32_t duration_ms, uint8_t volume)
         return ret;
     }
 
-    uint8_t *buffer = heap_caps_malloc(AUDIO_LOOPBACK_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer == NULL) {
-        buffer = heap_caps_malloc(AUDIO_LOOPBACK_BUFFER_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
+    uint8_t *buffer = solar_os_memory_alloc(AUDIO_LOOPBACK_BUFFER_BYTES,
+                                             SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                             "audio.loopback");
     if (buffer == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -886,7 +884,7 @@ esp_err_t solar_os_audio_loopback(uint32_t duration_ms, uint8_t volume)
         }
     }
 
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
     SOLAR_OS_LOGI(TAG, "loopback: %" PRIu32 " ms vol=%u ret=%s",
              duration_ms,
              volume,
@@ -978,10 +976,9 @@ esp_err_t solar_os_audio_record_wav(const char *path,
         return ret;
     }
 
-    uint8_t *buffer = heap_caps_malloc(AUDIO_WAV_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer == NULL) {
-        buffer = heap_caps_malloc(AUDIO_WAV_BUFFER_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
+    uint8_t *buffer = solar_os_memory_alloc(AUDIO_WAV_BUFFER_BYTES,
+                                             SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                             "audio.wav");
     if (buffer == NULL) {
         fclose(file);
         return ESP_ERR_NO_MEM;
@@ -1042,7 +1039,7 @@ esp_err_t solar_os_audio_record_wav(const char *path,
         ret = ESP_FAIL;
     }
     errno = close_errno;
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
 
     if (info != NULL) {
         *info = current;
@@ -1101,10 +1098,9 @@ esp_err_t solar_os_audio_play_wav(const char *path,
         return ret;
     }
 
-    uint8_t *buffer = heap_caps_malloc(AUDIO_WAV_BUFFER_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (buffer == NULL) {
-        buffer = heap_caps_malloc(AUDIO_WAV_BUFFER_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
+    uint8_t *buffer = solar_os_memory_alloc(AUDIO_WAV_BUFFER_BYTES,
+                                             SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                             "audio.wav");
     if (buffer == NULL) {
         fclose(file);
         return ESP_ERR_NO_MEM;
@@ -1163,7 +1159,7 @@ esp_err_t solar_os_audio_play_wav(const char *path,
     const int close_errno = errno;
     fclose(file);
     errno = close_errno;
-    heap_caps_free(buffer);
+    solar_os_memory_free(buffer);
 
     if (info != NULL) {
         *info = progress;
@@ -1214,11 +1210,11 @@ static esp_err_t audio_mp3_play_from_source(const audio_mp3_source_t *source,
         if (playback == NULL) {
             audio_log_heap_nomem("mp3 playback", AUDIO_WAV_BUFFER_BYTES);
         }
-        heap_caps_free(decoder);
-        heap_caps_free(input);
-        heap_caps_free(decoded);
-        heap_caps_free(output);
-        heap_caps_free(playback);
+        solar_os_memory_free(decoder);
+        solar_os_memory_free(input);
+        solar_os_memory_free(decoded);
+        solar_os_memory_free(output);
+        solar_os_memory_free(playback);
         return ESP_ERR_NO_MEM;
     }
 
@@ -1336,11 +1332,11 @@ static esp_err_t audio_mp3_play_from_source(const audio_mp3_source_t *source,
     }
     solar_os_board_audio_deinit();
 
-    heap_caps_free(decoder);
-    heap_caps_free(input);
-    heap_caps_free(decoded);
-    heap_caps_free(output);
-    heap_caps_free(playback);
+    solar_os_memory_free(decoder);
+    solar_os_memory_free(input);
+    solar_os_memory_free(decoded);
+    solar_os_memory_free(output);
+    solar_os_memory_free(playback);
 
     if (info != NULL) {
         *info = progress;

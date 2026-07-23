@@ -29,7 +29,7 @@
 #include "solar_os_buttons.h"
 #include "solar_os_cardkb.h"
 #include "solar_os_config.h"
-#if SOLAR_OS_PACKAGE_NET
+#if SOLAR_OS_PACKAGE_SERVICE_CHAT
 #include "solar_os_chat.h"
 #endif
 #include "solar_os_cdc.h"
@@ -40,15 +40,20 @@
 #include "solar_os_gfx_internal.h"
 #include "solar_os_fonts.h"
 #include "solar_os_i2c.h"
+#if SOLAR_OS_PACKAGE_SERVICE_INBOX
+#include "solar_os_inbox.h"
+#endif
 #include "solar_os_joystick.h"
 #include "solar_os_jobs.h"
 #include "solar_os_log.h"
 #include "solar_os_memory.h"
 #include "solar_os_onewire.h"
-#if SOLAR_OS_PACKAGE_NET
+#if SOLAR_OS_PACKAGE_SERVICE_MQTT
 #include "solar_os_mqtt.h"
 #endif
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
 #include "solar_os_ota.h"
+#endif
 #include "solar_os_port.h"
 #include "solar_os_port_shell.h"
 #include "solar_os_power.h"
@@ -962,6 +967,13 @@ static void update_status(void)
 
     solar_os_status_bar_t status = {0};
 
+#if SOLAR_OS_PACKAGE_SERVICE_INBOX
+    solar_os_inbox_status_t inbox;
+    if (solar_os_inbox_get_status(&inbox) == ESP_OK) {
+        status.inbox_unread = inbox.unread > UINT16_MAX ? UINT16_MAX : (uint16_t)inbox.unread;
+    }
+#endif
+
 #if SOLAR_OS_PACKAGE_SERVICE_BATTERY
     solar_os_battery_status_t battery;
     if (board_has(SOLAR_OS_BOARD_CAP_BATTERY) &&
@@ -1041,6 +1053,12 @@ static void init_peripherals(void)
     if (storage_err != ESP_OK) {
         SOLAR_OS_LOGW(TAG, "Default storage unavailable: %s", esp_err_to_name(storage_err));
     }
+#if SOLAR_OS_PACKAGE_SERVICE_INBOX
+    const esp_err_t inbox_err = solar_os_inbox_init();
+    if (inbox_err != ESP_OK) {
+        SOLAR_OS_LOGW(TAG, "Inbox service unavailable: %s", esp_err_to_name(inbox_err));
+    }
+#endif
 
 #if SOLAR_OS_PACKAGE_SERVICE_RESOURCES
     const esp_err_t resources_err = solar_os_resources_init();
@@ -1074,17 +1092,22 @@ static void init_peripherals(void)
     }
 #endif
 
+#if SOLAR_OS_PACKAGE_SERVICE_OTA
     const esp_err_t ota_err = solar_os_ota_init();
     if (ota_err != ESP_OK) {
         SOLAR_OS_LOGW(TAG, "OTA service unavailable: %s", esp_err_to_name(ota_err));
     }
+#endif
 
-#if SOLAR_OS_PACKAGE_NET
+#if SOLAR_OS_PACKAGE_SERVICE_MQTT
     const esp_err_t mqtt_err = solar_os_mqtt_init();
     if (mqtt_err != ESP_OK) {
         SOLAR_OS_LOGW(TAG, "MQTT service unavailable: %s", esp_err_to_name(mqtt_err));
     }
 
+#endif
+
+#if SOLAR_OS_PACKAGE_SERVICE_CHAT
     const esp_err_t chat_err = solar_os_chat_init();
     if (chat_err != ESP_OK) {
         SOLAR_OS_LOGW(TAG, "Chat service unavailable: %s", esp_err_to_name(chat_err));
@@ -1333,6 +1356,13 @@ void app_main(void)
     print_boot_summary();
     key_button_init();
 
+    const esp_err_t port_shell_err = solar_os_port_shell_init();
+    if (port_shell_err != ESP_OK) {
+        SOLAR_OS_LOGW(TAG,
+                      "Port shell reserve unavailable: %s",
+                      esp_err_to_name(port_shell_err));
+    }
+
     solar_os_context_init(&os_ctx, NULL, NULL);
     ESP_ERROR_CHECK(solar_os_sessions_init(&os_ctx,
                                            NULL,
@@ -1358,7 +1388,10 @@ void app_main(void)
 #endif
             solar_os_splash_clear(&gfx);
 
-            shell_terminal = solar_os_psram_calloc(1, sizeof(*shell_terminal));
+            shell_terminal = solar_os_memory_calloc(1,
+                                                    sizeof(*shell_terminal),
+                                                    SOLAR_OS_MEMORY_EXTERNAL_PREFERRED,
+                                                    "main.terminal");
             if (shell_terminal != NULL) {
                 solar_os_terminal_init(shell_terminal, display_u8g2);
                 terminal = shell_terminal;
