@@ -45,6 +45,7 @@ while remaining blocked from runtime use.
 | M5Stack Core2 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. Port A (SDA GPIO32/SCL GPIO33) is claimed internally by CardKB/dhex/aqm, not exposed as a generic expansion bus. |
 | M5Stack CoreS3 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. Port A I2C is claimed internally by CardKB/dhex/aqm, not exposed as a generic expansion bus. |
 | Waveshare ESP32-S3-Touch-LCD-5 | None documented yet | None | None | Minimal port -- no expansion GPIO/I2C/SPI/UART/ADC/PWM capability declared. GPIO15/16 carry `uart0` (usable as a point-to-point serial port once the board's TJA1051 CAN transceiver is swapped for a MAX232). |
+| ATS-Mini v1 | None documented yet | None | None | Every GPIO is claimed by a fixed board function (BOOT key, rotary encoder, SI4732 radio I2C/reset/LDO, battery ADC, ST7789 i80 display, audio mute/amp-enable) or the board-defined spi0 bus -- no free expansion GPIO/ADC/PWM. |
 
 Power and ground pins are physical wiring resources and are not managed by the
 SolarOS pin-claim system. Check the board schematic and the external module's
@@ -61,6 +62,7 @@ voltage and current requirements before connecting it.
 | M5Stack Core2 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal display/SD SPI pins and Port A's I2C are not expansion resources. |
 | M5Stack CoreS3 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal display/audio pins and Port A's I2C are not expansion resources. |
 | Waveshare ESP32-S3-Touch-LCD-5 | None | Not yet supported -- no runtime pin policy declared | No board-defined buses; the internal RGB panel and CH422G expander pins are not expansion resources. |
+| ATS-Mini v1 | `i2c0`: SDA GPIO18, SCL GPIO17 (SI4732 radio); `spi0`: SCK GPIO12, MISO GPIO13, MOSI GPIO11, CS GPIO14 (unused pins, no onboard device); `uart0`: TX GPIO43, RX GPIO44 | SPI on `spi3`, UART on `uart1`/`uart2`, using approved free pins | `i2c0` is shared -- an expansion device can sit on the same bus as the SI4732 at a different address. There is no free expansion I2C host and no free GPIO for a second bus. |
 
 I2C and SPI buses accept shared logical leases. UART and registered 1-Wire bus
 instances are exclusive. Registered 1-Wire buses appear in expansion status
