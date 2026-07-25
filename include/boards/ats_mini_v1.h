@@ -55,19 +55,41 @@
 #define SOLAR_OS_BOARD_PIN_AUDIO_AMP_ENABLE GPIO_NUM_10
 
 /*
- * ST7789, 170x320, 8-bit parallel (Intel 8080 / i80) bus -- see
- * drivers/tft_st7789_i80.c. RD is tied to a GPIO output held high
- * (the panel is never read from); WR/D0-D7 are driven by the ESP-IDF
- * i80 LCD peripheral, not bit-banged.
+ * ST7789, 170x320 native (portrait), 8-bit parallel (Intel 8080 /
+ * i80) bus -- see drivers/tft_st7789_i80.c. RD is tied to a GPIO
+ * output held high (the panel is never read from); WR/D0-D7 are
+ * driven by the ESP-IDF i80 LCD peripheral, not bit-banged.
+ *
+ * Hardware bring-up showed the prompt text pixel-mirrored at every
+ * non-swap rotation (R0/R2); solar_os_terminal's own runtime
+ * orientation override ("setterm orientation 180", which maps to
+ * U8G2_R3 -- see terminal_rotation_cb()) is the one that renders
+ * text right-way-up on this panel, confirmed on hardware. R1/R3 are
+ * u8g2's "swap" rotations: the logical width/height u8g2 reports to
+ * the rest of the OS (status bar layout, terminal column/row count)
+ * become the NATIVE dims transposed, not the native dims themselves
+ * -- DISPLAY_WIDTH/HEIGHT below are that swapped (320x170) logical
+ * size, while DISPLAY_NATIVE_WIDTH/HEIGHT stay the true 170x320
+ * panel/tile-buffer size the driver allocates against. Getting this
+ * split wrong is what caused the status bar and half the terminal
+ * rows to render outside the physical 170px dimension and vanish
+ * off-panel on first bring-up (matches the same swapped-native-dims
+ * pattern m5stack_core2.h uses for its own rotated panel).
  */
 #define SOLAR_OS_BOARD_DISPLAY_CONTROLLER "ST7789"
-#define SOLAR_OS_BOARD_DISPLAY_WIDTH 170
-#define SOLAR_OS_BOARD_DISPLAY_HEIGHT 320
+#define SOLAR_OS_BOARD_DISPLAY_WIDTH 320
+#define SOLAR_OS_BOARD_DISPLAY_HEIGHT 170
+#define SOLAR_OS_BOARD_DISPLAY_NATIVE_WIDTH 170
+#define SOLAR_OS_BOARD_DISPLAY_NATIVE_HEIGHT 320
 #define SOLAR_OS_BOARD_DISPLAY_PCLK_HZ 20000000
-/* First hardware bring-up showed the image upside down (prompt at the
- * top rendered flipped, scale-like garbage at the bottom) -- 180
- * degree rotation fixes that without needing swapped native dims. */
-#define SOLAR_OS_BOARD_DISPLAY_U8G2_ROTATION U8G2_R2
+#define SOLAR_OS_BOARD_DISPLAY_U8G2_ROTATION U8G2_R3
+/* This 170-wide panel sits on what's almost certainly a 240-wide
+ * ST7789 GRAM (standard for this controller), centered -- hardware
+ * bring-up showed the whole image offset by roughly (240-170)/2 in
+ * the native frame (visible after rotation as a vertical shift,
+ * since R3 swaps native X into logical Y). */
+#define SOLAR_OS_BOARD_DISPLAY_GAP_X 35
+#define SOLAR_OS_BOARD_DISPLAY_GAP_Y 0
 #define SOLAR_OS_BOARD_PIN_LCD_RST GPIO_NUM_5
 #define SOLAR_OS_BOARD_PIN_LCD_CS GPIO_NUM_6
 #define SOLAR_OS_BOARD_PIN_LCD_DC GPIO_NUM_7

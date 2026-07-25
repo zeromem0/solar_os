@@ -32,6 +32,20 @@
 #define SOLAR_OS_BOARD_DISPLAY_U8G2_ROTATION U8G2_R0
 #endif
 
+/* Gap between the panel's visible glass and the start of its GRAM,
+ * in the panel's native (unrotated) coordinate frame -- common on
+ * ST7789 modules narrower than the controller's full GRAM width
+ * (e.g. a 170px-wide panel centered in a 240px GRAM needs gap_x=35).
+ * u8g2's rotation is a pure software transform applied before tiles
+ * reach this driver, so the gap is always native-frame regardless of
+ * the active u8g2 rotation. */
+#ifndef SOLAR_OS_BOARD_DISPLAY_GAP_X
+#define SOLAR_OS_BOARD_DISPLAY_GAP_X 0
+#endif
+#ifndef SOLAR_OS_BOARD_DISPLAY_GAP_Y
+#define SOLAR_OS_BOARD_DISPLAY_GAP_Y 0
+#endif
+
 #ifndef SOLAR_OS_BOARD_LCD_BACKLIGHT_ACTIVE_LEVEL
 #define SOLAR_OS_BOARD_LCD_BACKLIGHT_ACTIVE_LEVEL 1
 #endif
@@ -308,6 +322,13 @@ static esp_err_t st7789_full_init(tft_st7789_i80_t *display)
 {
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(display->panel), TAG, "reset failed");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(display->panel), TAG, "init failed");
+#if SOLAR_OS_BOARD_DISPLAY_GAP_X != 0 || SOLAR_OS_BOARD_DISPLAY_GAP_Y != 0
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(display->panel,
+                                              SOLAR_OS_BOARD_DISPLAY_GAP_X,
+                                              SOLAR_OS_BOARD_DISPLAY_GAP_Y),
+                        TAG,
+                        "set gap failed");
+#endif
 #if SOLAR_OS_BOARD_DISPLAY_INVERT
     ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(display->panel, true), TAG, "invert failed");
 #endif
