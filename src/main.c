@@ -379,8 +379,7 @@ static void draw_session_overlay_if_needed(void)
     u8g2_SetDrawColor(u8g2, 0);
     u8g2_DrawFrame(u8g2, box_x, box_y, box_width, box_height);
     u8g2_DrawUTF8(u8g2, text_x, text_y, session_overlay_title);
-    (void)solar_os_display_request_present_mode(u8g2, SOLAR_OS_DISPLAY_PRESENT_TEXT);
-    u8g2_SendBuffer(u8g2);
+    solar_os_display_present(u8g2, SOLAR_OS_DISPLAY_PRESENT_TEXT);
 }
 
 static void session_terminal_changed(solar_os_terminal_t *new_terminal, void *user)
@@ -954,7 +953,7 @@ static void dispatch_app_tick(void)
 
 static void update_status(void)
 {
-    if (terminal == NULL) {
+    if (!solar_os_sessions_has_display_shell()) {
         return;
     }
 
@@ -1026,7 +1025,7 @@ static void update_status(void)
         status.minute = datetime.minute;
     }
 
-    solar_os_terminal_set_status_bar(terminal, &status);
+    solar_os_sessions_set_status_bar(&status);
 }
 
 static void init_peripherals(void)
