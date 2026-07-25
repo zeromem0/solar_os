@@ -78,6 +78,7 @@ static const char remote_page[] =
     "<button data-k=\"8\">Bksp</button>"
     "<button data-k=\"32\">Space</button>"
     "<button data-k=\"146\">EXIT</button>"
+    "<button data-combo=\"147,9\">ALT+TAB</button>"
     "</div>"
     "<input id=\"txt\" placeholder=\"type here (phone) or just type (desktop)\" autocomplete=\"off\">"
     "<div id=\"st\"></div>"
@@ -127,7 +128,9 @@ static const char remote_page[] =
     "var v=txt.value;txt.value='';"
     "for(var i=0;i<v.length;i++){var c=v.charCodeAt(i);if(c<127)send(c);}});"
     "document.querySelectorAll('#keys button').forEach(function(b){"
-    "b.addEventListener('click',function(){send(parseInt(b.dataset.k,10));});});"
+    "b.addEventListener('click',function(){"
+    "if(b.dataset.combo){b.dataset.combo.split(',').forEach(function(c){send(parseInt(c,10));});}"
+    "else{send(parseInt(b.dataset.k,10));}});});"
     "</script></body></html>";
 
 /* Keys-only page (/keys): the same keyboard capture and button row
@@ -159,6 +162,7 @@ static const char remote_keys_page[] =
     "<button data-k=\"8\">Bksp</button>"
     "<button data-k=\"32\">Space</button>"
     "<button data-k=\"146\">EXIT</button>"
+    "<button data-combo=\"147,9\">ALT+TAB</button>"
     "</div>"
     "<input id=\"txt\" placeholder=\"type here (phone) or just type (desktop)\" autocomplete=\"off\">"
     "<div id=\"st\"></div>"
@@ -181,7 +185,9 @@ static const char remote_keys_page[] =
     "var v=txt.value;txt.value='';"
     "for(var i=0;i<v.length;i++){var c=v.charCodeAt(i);if(c<127)send(c);}});"
     "document.querySelectorAll('#keys button').forEach(function(b){"
-    "b.addEventListener('click',function(){send(parseInt(b.dataset.k,10));});});"
+    "b.addEventListener('click',function(){"
+    "if(b.dataset.combo){b.dataset.combo.split(',').forEach(function(c){send(parseInt(c,10));});}"
+    "else{send(parseInt(b.dataset.k,10));}});});"
     "</script></body></html>";
 
 static void remote_bmp_write_u32(uint8_t *out, uint32_t value)
