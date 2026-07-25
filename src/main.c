@@ -43,6 +43,7 @@
 #if SOLAR_OS_PACKAGE_SERVICE_INBOX
 #include "solar_os_inbox.h"
 #endif
+#include "solar_os_encoder.h"
 #include "solar_os_joystick.h"
 #include "solar_os_jobs.h"
 #include "solar_os_log.h"
@@ -880,6 +881,21 @@ static void dispatch_adc_dpad_chars(void)
 #endif
 }
 
+static void dispatch_encoder_chars(void)
+{
+#if SOLAR_OS_PACKAGE_SERVICE_ENCODER
+    if (!board_has(SOLAR_OS_BOARD_CAP_ENCODER)) {
+        return;
+    }
+
+    char chars[8];
+    size_t count;
+    while ((count = solar_os_encoder_read_chars(chars, sizeof(chars))) > 0) {
+        dispatch_input_chars(chars, count);
+    }
+#endif
+}
+
 static void dispatch_cardkb_chars(void)
 {
 #if SOLAR_OS_PACKAGE_SERVICE_CARDKB
@@ -933,6 +949,7 @@ static void dispatch_input_sources(void)
     dispatch_button_chars();
     dispatch_joystick_chars();
     dispatch_adc_dpad_chars();
+    dispatch_encoder_chars();
     dispatch_cardkb_chars();
     dispatch_remote_chars();
 }
@@ -1179,6 +1196,15 @@ static void init_peripherals(void)
         const esp_err_t joystick_err = solar_os_joystick_init();
         if (joystick_err != ESP_OK) {
             SOLAR_OS_LOGW(TAG, "Joystick unavailable: %s", esp_err_to_name(joystick_err));
+        }
+    }
+#endif
+
+#if SOLAR_OS_PACKAGE_SERVICE_ENCODER
+    if (board_has(SOLAR_OS_BOARD_CAP_ENCODER)) {
+        const esp_err_t encoder_err = solar_os_encoder_init();
+        if (encoder_err != ESP_OK) {
+            SOLAR_OS_LOGW(TAG, "Encoder unavailable: %s", esp_err_to_name(encoder_err));
         }
     }
 #endif

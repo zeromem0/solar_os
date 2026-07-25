@@ -67,7 +67,7 @@ The current tree includes these board targets:
 | `m5stack_core2` | `m5stack_core2` | M5Stack Core2 | ILI9342C display via AXP192 PMIC bring-up, shared VSPI for LCD+SD, BLE keyboard, FT6336U touch, CardKB Grove keyboard, BM8563 RTC. |
 | `m5stack_cores3` | `m5stack_cores3` | M5Stack CoreS3 | ILI9342C display through the AXP2101 PMIC + AW9523B I2C GPIO expander, adjustable backlight, AW88298 speaker over I2S1, FT6336U touch, CardKB Grove keyboard, dhex/aqm apps over Port A, BM8563 RTC, Wi-Fi/BLE, USB CDC + UART0 consoles, quad-PSRAM. |
 | `waveshare_esp32_s3_touch_lcd_5` | `waveshare_esp32_s3_touch_lcd_5` | Waveshare ESP32-S3-Touch-LCD-5 | 800x480 RGB-parallel ST7262 panel with double-buffered present, CH422G I2C GPIO expander, GT911 capacitive touch, PCF85063 RTC, SD over SPI, and UART on GPIO15/16. |
-| `ats_mini_v1` | `ats_mini_v1` | esp32-si4732 ATS-Mini (bring-up) | ESP32-S3-WROOM-1-N16R8 target with the real ATS-Mini pinout: 170x320 ST7789 over an 8-bit i80 parallel bus, BOOT key, rotary encoder pins, SI4732 radio I2C/reset/LDO pins, battery ADC, audio mute/amp-enable. Encoder input and the radio itself are not wired to a SolarOS driver yet. |
+| `ats_mini_v1` | `ats_mini_v1` | esp32-si4732 ATS-Mini (bring-up) | ESP32-S3-WROOM-1-N16R8 target with the real ATS-Mini pinout: 170x320 ST7789 over an 8-bit i80 parallel bus (rotated, GRAM-gap corrected), BOOT key, quadrature rotary encoder + push button, SI4732 radio I2C/reset/LDO pins, battery ADC, audio mute/amp-enable. The radio itself is not wired to a SolarOS driver yet. |
 
 ## Board Profile
 
@@ -245,6 +245,7 @@ The current capability flags are:
 | `BUTTONS` | Built-in digital buttons are available for keyboard/app input. |
 | `JOYSTICK` | Built-in analog joystick axes are available for keyboard/app input. |
 | `ADC_DPAD` | Built-in ADC D-pad axes are available for keyboard/app input. |
+| `ENCODER` | Built-in quadrature rotary encoder + push button is available for keyboard/app input. |
 | `STATUS_LED` | Board status LED output is available. |
 | `DISPLAY_BRIGHTNESS` | Display backlight or brightness control is available. |
 | `TEMPERATURE` | Temperature sensor service. |

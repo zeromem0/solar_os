@@ -24,6 +24,22 @@
 #define SOLAR_OS_BOARD_UART_PORT UART_NUM_0
 #define SOLAR_OS_BOARD_PIN_UART_TX GPIO_NUM_43
 #define SOLAR_OS_BOARD_PIN_UART_RX GPIO_NUM_44
+/*
+ * Every serial-capable pin on this board is already spoken for by
+ * UART0 (43/44) -- there is no separate pair to dedicate to a real
+ * "PM UART" the way Core2 does for its particle sensor. `com` and
+ * `dhex` both target these same pins, aliasing the console's own
+ * UART, so an external serial device (RS-232 via a MAX3232 level
+ * shifter) wired here can be dumped/tapped without a second UART.
+ * This only works with the console's UART0 fallback shell disabled
+ * (see SOLAR_OS_BOARD_UART_NO_FALLBACK_SHELL below) -- otherwise the
+ * port stays leased to the console session and `com`/`dhex` report
+ * it busy.
+ */
+#define SOLAR_OS_BOARD_UART_NO_FALLBACK_SHELL 1
+#define SOLAR_OS_BOARD_PM_UART_PORT UART_NUM_0
+#define SOLAR_OS_BOARD_PIN_PM_UART_TX GPIO_NUM_43
+#define SOLAR_OS_BOARD_PIN_PM_UART_RX GPIO_NUM_44
 
 /* BOOT button, doubles as the SolarOS key input. */
 #define SOLAR_OS_BOARD_PIN_KEY GPIO_NUM_0

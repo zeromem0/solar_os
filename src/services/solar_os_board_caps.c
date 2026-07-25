@@ -40,6 +40,7 @@ static const board_capability_name_t capability_names[] = {
     {SOLAR_OS_BOARD_CAP_PM_UART, "pm_uart"},
     {SOLAR_OS_BOARD_CAP_PORT_A_I2C, "port_a_i2c"},
     {SOLAR_OS_BOARD_CAP_TOUCH, "touch"},
+    {SOLAR_OS_BOARD_CAP_ENCODER, "encoder"},
     {SOLAR_OS_BOARD_CAP_STATUS_LED, "status_led"},
     {SOLAR_OS_BOARD_CAP_DISPLAY_BRIGHTNESS, "display_brightness"},
     {SOLAR_OS_BOARD_CAP_TEMPERATURE, "temperature"},
@@ -80,6 +81,7 @@ solar_os_board_capabilities_t solar_os_board_capabilities(void)
         (SOLAR_OS_BOARD_HAS_PM_UART ? SOLAR_OS_BOARD_CAP_PM_UART : 0U) |
         (SOLAR_OS_BOARD_HAS_PORT_A_I2C ? SOLAR_OS_BOARD_CAP_PORT_A_I2C : 0U) |
         (SOLAR_OS_BOARD_HAS_TOUCH ? SOLAR_OS_BOARD_CAP_TOUCH : 0U) |
+        (SOLAR_OS_BOARD_HAS_ENCODER ? SOLAR_OS_BOARD_CAP_ENCODER : 0U) |
         (SOLAR_OS_BOARD_HAS_STATUS_LED ? SOLAR_OS_BOARD_CAP_STATUS_LED : 0U) |
         (SOLAR_OS_BOARD_HAS_DISPLAY_BRIGHTNESS ? SOLAR_OS_BOARD_CAP_DISPLAY_BRIGHTNESS : 0U) |
         (SOLAR_OS_BOARD_HAS_TEMPERATURE ? SOLAR_OS_BOARD_CAP_TEMPERATURE : 0U) |
