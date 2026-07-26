@@ -37,11 +37,10 @@
  * ascii row isn't grid-sensitive the same way, so it gets the bolder,
  * heavier BOLD font instead of MONO for better legibility. */
 #define DHEX_SMALL_FONT SOLAR_OS_GFX_FONT_MONO_14
-#define DHEX_BIG_FONT SOLAR_OS_GFX_FONT_BOLD_20
 #define DHEX_TOP_MARGIN 4
 #define DHEX_ROW_HEIGHT 18
 #define DHEX_ADDR_GAP 4
-#define DHEX_HEX_ASCII_GAP 10
+#define DHEX_HEX_ASCII_GAP 5
 #define DHEX_SECTION_GAP 12
 #define DHEX_BOTTOM_LINE_HEIGHT 14
 
@@ -77,9 +76,27 @@ typedef struct {
     uint8_t buffer[DHEX_BUFFER_SIZE];
     size_t total_received;
     size_t last_rendered_total;
+    /* Casio-editor-style settings screen: LEFT/RIGHT move between
+     * fields, UP/DOWN adjust the selected field's value (both always
+     * available at once, same convention as irriga's zone editor --
+     * the rotary encoder's own click toggles which pair its rotation
+     * currently sends). ENTER applies the draft to the UART and saves
+     * it; ESCAPE discards it. Nothing is touched until then. */
+    bool config_mode;
+    uint8_t config_field;
+    dhex_uart_config_t draft_config;
 } dhex_state_t;
 
 static dhex_state_t dhex_state;
+
+/* Cycling through a fixed list of standard rates is far more usable
+ * than nudging a raw integer one step at a time. */
+static const uint32_t dhex_common_bauds[] = {
+    300, 600, 1200, 2400, 4800, 9600, 19200, 38400,
+    57600, 115200, 230400, 460800, 921600,
+};
+#define DHEX_COMMON_BAUD_COUNT (sizeof(dhex_common_bauds) / sizeof(dhex_common_bauds[0]))
+#define DHEX_CONFIG_FIELD_COUNT 4U
 
 static void dhex_config_defaults(dhex_uart_config_t *cfg)
 {
@@ -162,6 +179,71 @@ static esp_err_t dhex_config_save(const dhex_uart_config_t *cfg)
 
     nvs_close(nvs);
     return ret;
+}
+
+static size_t dhex_baud_index(uint32_t baud)
+{
+    for (size_t i = 0; i < DHEX_COMMON_BAUD_COUNT; i++) {
+        if (dhex_common_bauds[i] == baud) {
+            return i;
+        }
+    }
+
+    /* A non-standard rate (set via a launch-arg run, say) -- land on
+     * its nearest neighbor so the first turn moves somewhere sensible. */
+    size_t nearest = 0;
+    uint32_t best_diff = UINT32_MAX;
+    for (size_t i = 0; i < DHEX_COMMON_BAUD_COUNT; i++) {
+        const uint32_t diff = dhex_common_bauds[i] > baud ?
+            dhex_common_bauds[i] - baud : baud - dhex_common_bauds[i];
+        if (diff < best_diff) {
+            best_diff = diff;
+            nearest = i;
+        }
+    }
+    return nearest;
+}
+
+/* delta is always +1 or -1 (one UP/DOWN key per encoder detent). */
+static void dhex_config_adjust(dhex_uart_config_t *cfg, uint8_t field, int delta)
+{
+    switch (field) {
+    case 0: {
+        const size_t count = DHEX_COMMON_BAUD_COUNT;
+        const size_t idx = (dhex_baud_index(cfg->baud) + (size_t)((int)count + delta)) % count;
+        cfg->baud = dhex_common_bauds[idx];
+        break;
+    }
+    case 1: {
+        int bits = (int)cfg->data_bits + delta;
+        if (bits < 5) {
+            bits = 8;
+        } else if (bits > 8) {
+            bits = 5;
+        }
+        cfg->data_bits = (uint8_t)bits;
+        break;
+    }
+    case 2: {
+        static const char parities[] = {'N', 'E', 'O'};
+        const size_t count = sizeof(parities);
+        size_t idx = 0;
+        for (size_t i = 0; i < count; i++) {
+            if (parities[i] == cfg->parity) {
+                idx = i;
+                break;
+            }
+        }
+        idx = (idx + (size_t)((int)count + delta)) % count;
+        cfg->parity = parities[idx];
+        break;
+    }
+    case 3:
+        cfg->stop_bits = cfg->stop_bits >= 2 ? 1U : 2U;
+        break;
+    default:
+        break;
+    }
 }
 
 static bool dhex_parse_u32(const char *text, uint32_t min, uint32_t max, uint32_t *value)
@@ -261,6 +343,22 @@ static bool dhex_parse_args(solar_os_context_t *ctx, dhex_uart_config_t *cfg)
     }
     *cfg = parsed;
     return true;
+}
+
+/* Placeholder content so the hex/ascii view has something to show
+ * before any real bytes arrive (or right after a reconfigure clears
+ * the ring buffer), instead of a screen full of "--". */
+static void dhex_seed_buffer(void)
+{
+    static const char seed[] = " Apreciometru \r\n";
+    const size_t seed_len = sizeof(seed) - 1U; /* exclude the NUL */
+
+    memset(dhex_state.buffer, 0, sizeof(dhex_state.buffer));
+    for (size_t i = 0; i < seed_len && i < DHEX_BUFFER_SIZE; i++) {
+        dhex_state.buffer[i] = (uint8_t)seed[i];
+    }
+    dhex_state.total_received = seed_len < DHEX_BUFFER_SIZE ? seed_len : DHEX_BUFFER_SIZE;
+    dhex_state.last_rendered_total = 0;
 }
 
 static uart_word_length_t dhex_data_bits_enum(uint8_t bits)
@@ -367,14 +465,14 @@ static void dhex_draw_wireshark_row(solar_os_gfx_t *gfx, size_t row, int y, int 
         dhex_state.total_received - DHEX_BUFFER_SIZE :
         0;
     snprintf(addr, sizeof(addr), "%04X:", (unsigned)((base_offset + (row * DHEX_ROW_BYTES)) & 0xFFFFU));
-    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
     solar_os_gfx_text(gfx, 0, y, addr);
 
     for (size_t col = 0; col < DHEX_ROW_BYTES; col++) {
         const size_t logical = (row * DHEX_ROW_BYTES) + col;
         const int x = hex_x + (int)(col * (size_t)hex_col_w);
         if (!dhex_slot_filled(logical)) {
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
             solar_os_gfx_text(gfx, x, y, "--");
             continue;
         }
@@ -382,7 +480,7 @@ static void dhex_draw_wireshark_row(solar_os_gfx_t *gfx, size_t row, int y, int 
         const uint8_t b = dhex_state.buffer[dhex_ring_index(logical)];
         char hex[3];
         snprintf(hex, sizeof(hex), "%02X", b);
-        solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+        solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
         solar_os_gfx_text(gfx, x, y, hex);
     }
 
@@ -395,17 +493,20 @@ static void dhex_draw_wireshark_row(solar_os_gfx_t *gfx, size_t row, int y, int 
 
         const uint8_t b = dhex_state.buffer[dhex_ring_index(logical)];
         char sym[2] = {0, 0};
-        if (b == 0x0D) {
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
-            sym[0] = 'C';
-        } else if (b == 0x0A) {
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
-            sym[0] = 'L';
-        } else if (b >= 0x20 && b <= 0x7E) {
+        if (b == 0x0D || b == 0x0A) {
+            /* Inverse video so a control-character stand-in can never
+             * be mistaken for a literal 'C' or 'L' byte. */
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+            /* ascii_col_w - 2: same visible gap as the bottom row, so
+             * back-to-back CR/LF don't fuse into one solid block. */
+            solar_os_gfx_fill_rect(gfx, x, y - DHEX_ROW_HEIGHT + 4, ascii_col_w - 2, DHEX_ROW_HEIGHT);
             solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+            sym[0] = b == 0x0D ? 'C' : 'L';
+        } else if (b >= 0x20 && b <= 0x7E) {
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
             sym[0] = (char)b;
         } else {
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
             sym[0] = '.';
         }
         solar_os_gfx_text(gfx, x, y, sym);
@@ -416,7 +517,7 @@ static void dhex_draw_wireshark_section(solar_os_gfx_t *gfx, int top_y, int hex_
 {
     solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
 
-    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
     solar_os_gfx_text(gfx, 0, top_y, "Addr:");
     for (size_t col = 0; col < DHEX_ROW_BYTES; col++) {
         char header[3];
@@ -431,8 +532,30 @@ static void dhex_draw_wireshark_section(solar_os_gfx_t *gfx, int top_y, int hex_
     }
 }
 
+/* Height above the baseline of the small counting tick, and its size. */
+#define DHEX_BIG_TICK_Y_OFFSET 30
+#define DHEX_BIG_TICK_WIDTH 1
+#define DHEX_BIG_TICK_HEIGHT 2
+
+/* Same rule irriga's clock display uses: the bigger ProFont on tall
+ * panels, a half-size one everywhere else. */
+static solar_os_gfx_font_t dhex_font_big(solar_os_gfx_t *gfx)
+{
+    return solar_os_gfx_height(gfx) >= 480 ? SOLAR_OS_GFX_FONT_PROFONT_58 : SOLAR_OS_GFX_FONT_PROFONT_29;
+}
+
 static void dhex_draw_big_ascii_section(solar_os_gfx_t *gfx, int y, int col_w)
 {
+    /* A tick above every column position -- a lightweight ruler so
+     * columns are easy to count at a glance, independent of content.
+     * BLACK, not DARK: DARK dithers on a 1bpp panel, which at just 1-2
+     * pixels can drop one of the two stacked pixels entirely. */
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+    for (size_t i = 0; i < DHEX_BUFFER_SIZE; i++) {
+        const int x = (int)(i * (size_t)col_w);
+        solar_os_gfx_fill_rect(gfx, x, y - DHEX_BIG_TICK_Y_OFFSET, DHEX_BIG_TICK_WIDTH, DHEX_BIG_TICK_HEIGHT);
+    }
+
     for (size_t i = 0; i < DHEX_BUFFER_SIZE; i++) {
         const int x = (int)(i * (size_t)col_w);
         if (!dhex_slot_filled(i)) {
@@ -441,20 +564,31 @@ static void dhex_draw_big_ascii_section(solar_os_gfx_t *gfx, int y, int col_w)
 
         const uint8_t b = dhex_state.buffer[dhex_ring_index(i)];
         if (b == 0x0D || b == 0x0A) {
+            /* Inverse video, same reasoning as the wireshark section:
+             * these are stand-ins for control characters, never real
+             * letters, and must read as visually distinct at a glance. */
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+            /* col_w - 2: leaves a visible gap so back-to-back CR/LF
+             * (as in a plain "\r\n") don't fuse into one solid block. */
+            solar_os_gfx_fill_rect(gfx,
+                                   x,
+                                   y - (2 * DHEX_BOTTOM_LINE_HEIGHT) + 4,
+                                   col_w - 2,
+                                   2 * DHEX_BOTTOM_LINE_HEIGHT);
             solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
             const char *top = b == 0x0D ? "C" : "L";
             const char *bottom = b == 0x0D ? "R" : "F";
             solar_os_gfx_text(gfx, x, y - DHEX_BOTTOM_LINE_HEIGHT, top);
             solar_os_gfx_text(gfx, x, y, bottom);
         } else if (b >= 0x20 && b <= 0x7E) {
-            solar_os_gfx_set_font(gfx, DHEX_BIG_FONT);
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+            solar_os_gfx_set_font(gfx, dhex_font_big(gfx));
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
             char sym[2] = {(char)b, 0};
             solar_os_gfx_text(gfx, x, y, sym);
         } else {
             solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
-            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
             solar_os_gfx_text(gfx, x, y, ".");
         }
     }
@@ -465,7 +599,7 @@ static void dhex_draw_header(solar_os_gfx_t *gfx)
     const int screen_width = (int)solar_os_gfx_width(gfx);
 
     solar_os_gfx_set_font(gfx, DHEX_TITLE_FONT);
-    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
     solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, DHEX_HEADER_TITLE_BASELINE, "dhex");
 
     const dhex_uart_config_t *cfg = &dhex_state.active_config;
@@ -482,7 +616,7 @@ static void dhex_draw_header(solar_os_gfx_t *gfx)
     snprintf(pins, sizeof(pins), "RX%d TX%d", cfg->rx_pin, cfg->tx_pin);
 
     solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
-    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_DARK);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
     const int params_w = (int)solar_os_gfx_text_width(gfx, params);
     const int pins_w = (int)solar_os_gfx_text_width(gfx, pins);
     solar_os_gfx_text(gfx,
@@ -497,6 +631,76 @@ static void dhex_draw_header(solar_os_gfx_t *gfx)
     solar_os_gfx_line(gfx, 0, DHEX_HEADER_HEIGHT, screen_width - 1, DHEX_HEADER_HEIGHT);
 }
 
+/* Full-width highlight bars rather than text-measured boxes: simpler,
+ * and correct regardless of how narrow/short the panel is. */
+static void dhex_draw_config_screen(solar_os_gfx_t *gfx)
+{
+    const dhex_uart_config_t *cfg = &dhex_state.draft_config;
+    const int screen_width = (int)solar_os_gfx_width(gfx);
+    const int screen_height = (int)solar_os_gfx_height(gfx);
+
+    solar_os_gfx_clear(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+
+    solar_os_gfx_set_font(gfx, DHEX_TITLE_FONT);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+    solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, DHEX_HEADER_TITLE_BASELINE, "dhex config");
+    solar_os_gfx_line(gfx, 0, DHEX_HEADER_HEIGHT, screen_width - 1, DHEX_HEADER_HEIGHT);
+
+    char baud_text[12];
+    snprintf(baud_text, sizeof(baud_text), "%u", (unsigned)cfg->baud);
+    char bits_text[4];
+    snprintf(bits_text, sizeof(bits_text), "%u", (unsigned)cfg->data_bits);
+    const char *parity_text = cfg->parity == 'E' ? "Even" : cfg->parity == 'O' ? "Odd" : "None";
+    char stop_text[4];
+    snprintf(stop_text, sizeof(stop_text), "%u", (unsigned)cfg->stop_bits);
+
+    static const char *labels[DHEX_CONFIG_FIELD_COUNT] = {"Baud", "Data bits", "Parity", "Stop bits"};
+    const char *values[DHEX_CONFIG_FIELD_COUNT] = {baud_text, bits_text, parity_text, stop_text};
+
+    const int footer_h = DHEX_ROW_HEIGHT;
+    const int fields_top = DHEX_HEADER_HEIGHT + DHEX_TOP_MARGIN;
+    const int fields_bottom = screen_height - footer_h;
+    const int row_h = (fields_bottom - fields_top) / (int)DHEX_CONFIG_FIELD_COUNT;
+
+    solar_os_gfx_set_font(gfx, DHEX_TITLE_FONT);
+    for (uint8_t i = 0; i < DHEX_CONFIG_FIELD_COUNT; i++) {
+        char line[32];
+        snprintf(line, sizeof(line), "%s: %s", labels[i], values[i]);
+        const int row_top = fields_top + ((int)i * row_h);
+        const int baseline = row_top + row_h - 4;
+
+        if (i == dhex_state.config_field) {
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+            solar_os_gfx_fill_rect(gfx, 0, row_top, screen_width, row_h);
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+        } else {
+            solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+        }
+        solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, baseline, line);
+    }
+
+    solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_LIGHT);
+    solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, screen_height - 2, "Enter: apply  Esc: cancel");
+
+    solar_os_gfx_present(gfx);
+}
+
+static void dhex_apply_config(void)
+{
+    dhex_uart_stop();
+    const esp_err_t ret = dhex_uart_start(&dhex_state.draft_config);
+    dhex_state.active_config = dhex_state.draft_config;
+    dhex_state.uart_ready = ret == ESP_OK;
+    if (ret != ESP_OK) {
+        SOLAR_OS_LOGW(TAG, "UART reconfigure failed: %s", esp_err_to_name(ret));
+    }
+    if (dhex_config_save(&dhex_state.draft_config) != ESP_OK) {
+        SOLAR_OS_LOGW(TAG, "failed to save config to NVS");
+    }
+    dhex_seed_buffer();
+}
+
 static void dhex_render(solar_os_context_t *ctx)
 {
     solar_os_gfx_t *gfx = solar_os_context_gfx(ctx);
@@ -504,12 +708,17 @@ static void dhex_render(solar_os_context_t *ctx)
         return;
     }
 
-    solar_os_gfx_clear(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+    if (dhex_state.config_mode) {
+        dhex_draw_config_screen(gfx);
+        return;
+    }
+
+    solar_os_gfx_clear(gfx, SOLAR_OS_GFX_COLOR_BLACK);
     dhex_draw_header(gfx);
 
     if (!dhex_state.uart_ready) {
         solar_os_gfx_set_font(gfx, DHEX_SMALL_FONT);
-        solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+        solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
         solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, DHEX_HEADER_HEIGHT + DHEX_ROW_HEIGHT, "uart unavailable");
         solar_os_gfx_present(gfx);
         return;
@@ -550,6 +759,7 @@ static esp_err_t dhex_start(solar_os_context_t *ctx)
 
     memset(&dhex_state, 0, sizeof(dhex_state));
     dhex_state.active_config = cfg;
+    dhex_seed_buffer();
 
     const esp_err_t ret = dhex_uart_start(&cfg);
     if (ret != ESP_OK) {
@@ -609,15 +819,66 @@ static bool dhex_event(solar_os_context_t *ctx, const solar_os_event_t *event)
 
     if (event->type == SOLAR_OS_EVENT_CHAR) {
         const uint8_t ch = (uint8_t)event->data.ch;
-        if (ch == SOLAR_OS_KEY_APP_EXIT || ch == SOLAR_OS_KEY_ESCAPE) {
+        if (ch == SOLAR_OS_KEY_APP_EXIT) {
             solar_os_context_request_exit(ctx);
+            return true;
+        }
+
+        if (!dhex_state.config_mode) {
+            switch (ch) {
+            case SOLAR_OS_KEY_ESCAPE:
+                solar_os_context_request_exit(ctx);
+                break;
+            case '\r':
+            case '\n':
+                dhex_state.draft_config = dhex_state.active_config;
+                dhex_state.config_field = 0;
+                dhex_state.config_mode = true;
+                dhex_render(ctx);
+                break;
+            default:
+                break;
+            }
+            return true;
+        }
+
+        switch (ch) {
+        case SOLAR_OS_KEY_LEFT:
+            dhex_state.config_field = dhex_state.config_field == 0 ?
+                (uint8_t)(DHEX_CONFIG_FIELD_COUNT - 1U) : (uint8_t)(dhex_state.config_field - 1U);
+            dhex_render(ctx);
+            break;
+        case SOLAR_OS_KEY_RIGHT:
+            dhex_state.config_field = (uint8_t)((dhex_state.config_field + 1U) % DHEX_CONFIG_FIELD_COUNT);
+            dhex_render(ctx);
+            break;
+        case SOLAR_OS_KEY_UP:
+            dhex_config_adjust(&dhex_state.draft_config, dhex_state.config_field, 1);
+            dhex_render(ctx);
+            break;
+        case SOLAR_OS_KEY_DOWN:
+            dhex_config_adjust(&dhex_state.draft_config, dhex_state.config_field, -1);
+            dhex_render(ctx);
+            break;
+        case '\r':
+        case '\n':
+            dhex_apply_config();
+            dhex_state.config_mode = false;
+            dhex_render(ctx);
+            break;
+        case SOLAR_OS_KEY_ESCAPE:
+            dhex_state.config_mode = false;
+            dhex_render(ctx);
+            break;
+        default:
+            break;
         }
         return true;
     }
 
     if (event->type == SOLAR_OS_EVENT_TICK) {
         dhex_poll_uart();
-        if (dhex_state.total_received != dhex_state.last_rendered_total) {
+        if (!dhex_state.config_mode && dhex_state.total_received != dhex_state.last_rendered_total) {
             dhex_render(ctx);
         }
         return true;
@@ -633,7 +894,7 @@ static bool dhex_event(solar_os_context_t *ctx, const solar_os_event_t *event)
 
 const solar_os_app_t solar_os_dhex_app = {
     .name = "dhex",
-    .summary = "hex/ascii UART dump; usage: dhex [baud framing rx tx [port]] e.g. dhex 9600 8E1 13 14",
+    .summary = "hex/ascii UART dump; usage: dhex [baud framing rx tx [port]] e.g. dhex 9600 8E1 13 14; Enter opens a settings screen (baud/bits/parity/stop) that reconfigures and saves on exit",
     .flags = SOLAR_OS_APP_FLAG_RESUMABLE,
     .start = dhex_start,
     .suspend = dhex_suspend,
