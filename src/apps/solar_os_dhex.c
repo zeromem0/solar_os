@@ -9,6 +9,7 @@
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -91,7 +92,11 @@ typedef struct {
     dhex_uart_config_t draft_config;
 } dhex_state_t;
 
-static dhex_state_t dhex_state;
+/* PSRAM, not internal SRAM -- same convention solar_os_lua.c and
+ * solar_os_python.c use for their app state, and one this file didn't
+ * follow when the autobaud feature was added, costing LCD-5's already
+ * razor-thin internal SRAM margin ~340 bytes for no reason. */
+static EXT_RAM_BSS_ATTR dhex_state_t dhex_state;
 
 /* Cycling through a fixed list of standard rates is far more usable
  * than nudging a raw integer one step at a time. 0 is the "Autobaud"
@@ -123,7 +128,14 @@ typedef struct {
     volatile uint32_t edge_count;
 } dhex_autobaud_isr_state_t;
 
-static dhex_autobaud_isr_state_t dhex_autobaud_isr;
+/* PSRAM: only touched while autobaud is actively running (a rare,
+ * user-triggered, few-seconds-long operation), so the extra access
+ * latency on each GPIO edge is a good trade for not permanently
+ * costing internal SRAM the other 99.9% of the time. Safe from the
+ * ISR: gpio_install_isr_service() below is called without
+ * ESP_INTR_FLAG_IRAM, so the handler always runs with the flash
+ * cache enabled and PSRAM reachable. */
+static EXT_RAM_BSS_ATTR dhex_autobaud_isr_state_t dhex_autobaud_isr;
 static bool dhex_autobaud_isr_service_installed;
 
 static void IRAM_ATTR dhex_autobaud_isr_handler(void *arg)
@@ -751,16 +763,25 @@ static void dhex_draw_wireshark_section(solar_os_gfx_t *gfx, int top_y, int hex_
     }
 }
 
-/* Height above the baseline of the small counting tick, and its size. */
-#define DHEX_BIG_TICK_Y_OFFSET 30
+/* Gap between the tick and the top of the font's glyphs, and the
+ * tick's own size. */
+#define DHEX_BIG_TICK_GAP 10
 #define DHEX_BIG_TICK_WIDTH 1
 #define DHEX_BIG_TICK_HEIGHT 2
 
 /* Same rule irriga's clock display uses: the bigger ProFont on tall
- * panels, a half-size one everywhere else. */
+ * panels, a half-size one everywhere else. The PROFONT_* name is its
+ * nominal pixel size (the 2x-doubled and 1x families share this
+ * numbering), which doubles as a good-enough glyph height estimate --
+ * solar_os_gfx doesn't expose font ascent/height directly. */
+static int dhex_font_big_size(solar_os_gfx_t *gfx)
+{
+    return solar_os_gfx_height(gfx) >= 480 ? 58 : 29;
+}
+
 static solar_os_gfx_font_t dhex_font_big(solar_os_gfx_t *gfx)
 {
-    return solar_os_gfx_height(gfx) >= 480 ? SOLAR_OS_GFX_FONT_PROFONT_58 : SOLAR_OS_GFX_FONT_PROFONT_29;
+    return dhex_font_big_size(gfx) >= 58 ? SOLAR_OS_GFX_FONT_PROFONT_58 : SOLAR_OS_GFX_FONT_PROFONT_29;
 }
 
 static void dhex_draw_big_ascii_section(solar_os_gfx_t *gfx, int y, int col_w)
@@ -769,10 +790,11 @@ static void dhex_draw_big_ascii_section(solar_os_gfx_t *gfx, int y, int col_w)
      * columns are easy to count at a glance, independent of content.
      * BLACK, not DARK: DARK dithers on a 1bpp panel, which at just 1-2
      * pixels can drop one of the two stacked pixels entirely. */
+    const int tick_y = y - dhex_font_big_size(gfx) - DHEX_BIG_TICK_GAP;
     solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
     for (size_t i = 0; i < DHEX_BUFFER_SIZE; i++) {
         const int x = (int)(i * (size_t)col_w);
-        solar_os_gfx_fill_rect(gfx, x, y - DHEX_BIG_TICK_Y_OFFSET, DHEX_BIG_TICK_WIDTH, DHEX_BIG_TICK_HEIGHT);
+        solar_os_gfx_fill_rect(gfx, x, tick_y, DHEX_BIG_TICK_WIDTH, DHEX_BIG_TICK_HEIGHT);
     }
 
     for (size_t i = 0; i < DHEX_BUFFER_SIZE; i++) {
