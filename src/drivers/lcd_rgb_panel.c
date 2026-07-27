@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_ops.h"
@@ -77,9 +78,19 @@ static SemaphoreHandle_t lcd_vsync_sem;
  * lcd_byte_lut expands one native framebuffer byte (8 vertical
  * pixels, LSB = top) to 8 RGB565 words; lcd_byte_lut_rev is the same
  * with the words in reverse order, for the CCW mounting direction.
+ *
+ * The two tables are 4KB each (8KB total) and, unlike the staging
+ * buffer below, carry none of its "must be internal for a cheap
+ * contiguous burst" reasoning -- they're computed once at init and
+ * only ever read back a contiguous 16 bytes at a time (a cache-
+ * friendly access, not the scattered-write pattern this file is
+ * optimizing away). EXT_RAM_BSS_ATTR puts them in PSRAM instead,
+ * same convention solar_os_lua.c/solar_os_python.c use for their own
+ * app state -- this board's internal SRAM is tight enough that a
+ * static 8KB sitting there unnecessarily matters.
  */
-static uint16_t lcd_byte_lut[256][8];
-static uint16_t lcd_byte_lut_rev[256][8];
+static EXT_RAM_BSS_ATTR uint16_t lcd_byte_lut[256][8];
+static EXT_RAM_BSS_ATTR uint16_t lcd_byte_lut_rev[256][8];
 static uint16_t lcd_row_staging[LCD_PHYS_WIDTH];
 
 static void lcd_rgb_init_luts(void)
