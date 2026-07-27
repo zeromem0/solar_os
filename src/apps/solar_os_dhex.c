@@ -2,12 +2,16 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "nvs.h"
 #include "solar_os_board.h"
 #include "solar_os_gfx.h"
@@ -90,13 +94,228 @@ typedef struct {
 static dhex_state_t dhex_state;
 
 /* Cycling through a fixed list of standard rates is far more usable
- * than nudging a raw integer one step at a time. */
+ * than nudging a raw integer one step at a time. 0 is the "Autobaud"
+ * sentinel: applying the config with this selected runs edge-timing
+ * detection on the RX pin instead of using a fixed rate. */
 static const uint32_t dhex_common_bauds[] = {
-    300, 600, 1200, 2400, 4800, 9600, 19200, 38400,
+    0, 300, 600, 1200, 2400, 4800, 9600, 19200, 38400,
     57600, 115200, 230400, 460800, 921600,
 };
 #define DHEX_COMMON_BAUD_COUNT (sizeof(dhex_common_bauds) / sizeof(dhex_common_bauds[0]))
 #define DHEX_CONFIG_FIELD_COUNT 4U
+
+/* Autobaud: passive edge-timing detection, same technique as
+ * ESP32-Bit-Pirate's detectBaudByEdge -- listen for transitions on
+ * the RX line (no probe byte sent, works only if the far end is
+ * already talking), measure inter-edge intervals in short windows,
+ * score each candidate rate by how well the intervals fit as integer
+ * bit-time multiples, and require the winner to repeat across a
+ * couple of windows before trusting it. */
+#define DHEX_AUTOBAUD_MAX_INTERVALS 64U
+#define DHEX_AUTOBAUD_WINDOW_MS 300U
+#define DHEX_AUTOBAUD_TOTAL_MS 3000U
+#define DHEX_AUTOBAUD_MIN_EDGES 30U
+
+typedef struct {
+    volatile uint32_t last_edge_us;
+    volatile uint32_t intervals[DHEX_AUTOBAUD_MAX_INTERVALS];
+    volatile uint8_t interval_count;
+    volatile uint32_t edge_count;
+} dhex_autobaud_isr_state_t;
+
+static dhex_autobaud_isr_state_t dhex_autobaud_isr;
+static bool dhex_autobaud_isr_service_installed;
+
+static void IRAM_ATTR dhex_autobaud_isr_handler(void *arg)
+{
+    (void)arg;
+    const uint32_t now = (uint32_t)esp_timer_get_time();
+    if (dhex_autobaud_isr.last_edge_us != 0 && dhex_autobaud_isr.interval_count < DHEX_AUTOBAUD_MAX_INTERVALS) {
+        dhex_autobaud_isr.intervals[dhex_autobaud_isr.interval_count++] = now - dhex_autobaud_isr.last_edge_us;
+    }
+    dhex_autobaud_isr.last_edge_us = now;
+    dhex_autobaud_isr.edge_count++;
+}
+
+typedef struct {
+    uint32_t edges;
+    uint32_t approx_baud;
+} dhex_baud_measurement_t;
+
+static dhex_baud_measurement_t dhex_measure_baud_once(gpio_num_t pin, uint32_t window_ms)
+{
+    dhex_autobaud_isr.last_edge_us = 0;
+    dhex_autobaud_isr.interval_count = 0;
+    dhex_autobaud_isr.edge_count = 0;
+
+    if (!dhex_autobaud_isr_service_installed) {
+        gpio_install_isr_service(0);
+        dhex_autobaud_isr_service_installed = true;
+    }
+
+    const gpio_config_t io_config = {
+        .pin_bit_mask = 1ULL << (unsigned)pin,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_ANYEDGE,
+    };
+    gpio_config(&io_config);
+    gpio_isr_handler_add(pin, dhex_autobaud_isr_handler, NULL);
+
+    vTaskDelay(pdMS_TO_TICKS(window_ms));
+
+    gpio_isr_handler_remove(pin);
+
+    dhex_baud_measurement_t result = {0};
+    result.edges = dhex_autobaud_isr.edge_count;
+
+    const uint8_t raw_count = dhex_autobaud_isr.interval_count;
+    if (raw_count <= 8) {
+        return result;
+    }
+
+    uint32_t intervals[DHEX_AUTOBAUD_MAX_INTERVALS];
+    memcpy(intervals, (const void *)dhex_autobaud_isr.intervals, raw_count * sizeof(uint32_t));
+
+    /* Small insertion sort -- at most 64 entries. */
+    for (uint8_t i = 1; i < raw_count; i++) {
+        const uint32_t key = intervals[i];
+        int j = (int)i - 1;
+        while (j >= 0 && intervals[j] > key) {
+            intervals[j + 1] = intervals[j];
+            j--;
+        }
+        intervals[j + 1] = key;
+    }
+
+    uint8_t count = 0;
+    for (uint8_t i = 0; i < raw_count; i++) {
+        if (intervals[i] >= 2U && intervals[i] <= 200000U) {
+            intervals[count++] = intervals[i];
+        }
+    }
+    if (count <= 8) {
+        return result;
+    }
+
+    /*
+     * The bit period is the SHORTEST real gap between two edges: a UART
+     * line physically cannot transition faster than once per bit, so
+     * the minimum inter-edge interval is exactly one bit time. Multi-bit
+     * runs only ever produce longer (integer-multiple) intervals, never
+     * shorter -- which is precisely why an interval-scoring approach
+     * gets fooled into a sub-harmonic (it can "explain" a 9600 stream as
+     * 4800 using the 2-bit intervals and ignoring the 1-bit ones). Using
+     * the minimum sidesteps that: one genuine single-bit gap is enough.
+     *
+     * intervals[] is sorted ascending and already glitch-filtered
+     * (>= 2us). Take a low percentile rather than the absolute minimum
+     * so a lone sub-bit glitch that slipped the floor can't inflate the
+     * rate; a handful of real single-bit gaps always cluster here. For
+     * the ideal calibration signal (a run of 0x55 'U', pure alternating
+     * bits) every interval equals one bit, so this lands dead-on.
+     */
+    const size_t bit_index = (size_t)count / 20U; /* ~5th percentile */
+    const uint32_t bit_us = intervals[bit_index];
+    if (bit_us > 0U) {
+        const uint32_t guess = 1000000UL / bit_us;
+        if (guess >= 1000U && guess <= 400000U) {
+            result.approx_baud = guess;
+        }
+    }
+
+    return result;
+}
+
+static uint32_t dhex_snap_to_standard_baud(uint32_t approx)
+{
+    uint32_t snapped = 0;
+    uint32_t best_diff = UINT32_MAX;
+    for (size_t i = 0; i < DHEX_COMMON_BAUD_COUNT; i++) {
+        const uint32_t candidate = dhex_common_bauds[i];
+        if (candidate == 0) {
+            continue;
+        }
+        const uint32_t diff = approx > candidate ? approx - candidate : candidate - approx;
+        if (diff < best_diff) {
+            best_diff = diff;
+            snapped = candidate;
+        }
+    }
+    return snapped;
+}
+
+/* Returns a detected standard baud rate, or 0 if nothing converged
+ * within DHEX_AUTOBAUD_TOTAL_MS (no traffic, or too irregular to
+ * pin down). Blocking -- vTaskDelay inside each measurement window
+ * yields normally, but the calling app is unresponsive for up to
+ * DHEX_AUTOBAUD_TOTAL_MS, which is why the caller draws a "detecting"
+ * screen first. */
+static uint32_t dhex_detect_baud(gpio_num_t pin)
+{
+    uint32_t vote_baud[DHEX_COMMON_BAUD_COUNT] = {0};
+    uint32_t vote_count[DHEX_COMMON_BAUD_COUNT] = {0};
+    size_t vote_entries = 0;
+    uint32_t best_baud = 0;
+    uint32_t best_votes = 0;
+    uint32_t consecutive_baud = 0;
+    uint32_t consecutive_count = 0;
+    const uint32_t burst_threshold = (DHEX_AUTOBAUD_MIN_EDGES * 6U) > 24U ?
+        (DHEX_AUTOBAUD_MIN_EDGES * 6U) : 24U;
+
+    const int64_t start_us = esp_timer_get_time();
+    while ((esp_timer_get_time() - start_us) < ((int64_t)DHEX_AUTOBAUD_TOTAL_MS * 1000)) {
+        const dhex_baud_measurement_t m = dhex_measure_baud_once(pin, DHEX_AUTOBAUD_WINDOW_MS);
+        if (m.edges < DHEX_AUTOBAUD_MIN_EDGES || m.approx_baud == 0) {
+            consecutive_baud = 0;
+            consecutive_count = 0;
+            continue;
+        }
+
+        const uint32_t snapped = dhex_snap_to_standard_baud(m.approx_baud);
+        const uint32_t diff = m.approx_baud > snapped ? m.approx_baud - snapped : snapped - m.approx_baud;
+        if (m.edges >= burst_threshold && diff == 0) {
+            return snapped;
+        }
+
+        size_t idx = vote_entries;
+        for (size_t i = 0; i < vote_entries; i++) {
+            if (vote_baud[i] == snapped) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx == vote_entries && vote_entries < DHEX_COMMON_BAUD_COUNT) {
+            vote_baud[vote_entries] = snapped;
+            vote_count[vote_entries] = 0;
+            vote_entries++;
+        }
+        if (idx < vote_entries) {
+            vote_count[idx]++;
+            if (vote_count[idx] > best_votes) {
+                best_votes = vote_count[idx];
+                best_baud = snapped;
+            }
+        }
+
+        if (snapped == consecutive_baud) {
+            consecutive_count++;
+        } else {
+            consecutive_baud = snapped;
+            consecutive_count = 1;
+        }
+
+        if (consecutive_count >= 2U) {
+            return consecutive_baud;
+        }
+        if (best_votes >= 3U) {
+            return best_baud;
+        }
+    }
+
+    return 0;
+}
 
 static void dhex_config_defaults(dhex_uart_config_t *cfg)
 {
@@ -647,7 +866,11 @@ static void dhex_draw_config_screen(solar_os_gfx_t *gfx)
     solar_os_gfx_line(gfx, 0, DHEX_HEADER_HEIGHT, screen_width - 1, DHEX_HEADER_HEIGHT);
 
     char baud_text[12];
-    snprintf(baud_text, sizeof(baud_text), "%u", (unsigned)cfg->baud);
+    if (cfg->baud == 0) {
+        strlcpy(baud_text, "Autobaud", sizeof(baud_text));
+    } else {
+        snprintf(baud_text, sizeof(baud_text), "%u", (unsigned)cfg->baud);
+    }
     char bits_text[4];
     snprintf(bits_text, sizeof(bits_text), "%u", (unsigned)cfg->data_bits);
     const char *parity_text = cfg->parity == 'E' ? "Even" : cfg->parity == 'O' ? "Odd" : "None";
@@ -686,8 +909,41 @@ static void dhex_draw_config_screen(solar_os_gfx_t *gfx)
     solar_os_gfx_present(gfx);
 }
 
-static void dhex_apply_config(void)
+static void dhex_draw_detecting_screen(solar_os_gfx_t *gfx)
 {
+    const int screen_width = (int)solar_os_gfx_width(gfx);
+    const int screen_height = (int)solar_os_gfx_height(gfx);
+
+    solar_os_gfx_clear(gfx, SOLAR_OS_GFX_COLOR_BLACK);
+    solar_os_gfx_set_font(gfx, DHEX_TITLE_FONT);
+    solar_os_gfx_set_color(gfx, SOLAR_OS_GFX_COLOR_WHITE);
+    solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, DHEX_HEADER_TITLE_BASELINE, "dhex config");
+    solar_os_gfx_line(gfx, 0, DHEX_HEADER_HEIGHT, screen_width - 1, DHEX_HEADER_HEIGHT);
+    solar_os_gfx_text(gfx, DHEX_HEADER_MARGIN, screen_height / 2, "Detecting baud...");
+    solar_os_gfx_present(gfx);
+}
+
+/* Autobaud selected: blocks for up to DHEX_AUTOBAUD_TOTAL_MS, so the
+ * caller must already have the "detecting" screen on-panel before
+ * this runs (the app is unresponsive to input for that stretch). */
+static void dhex_apply_config(solar_os_context_t *ctx)
+{
+    if (dhex_state.draft_config.baud == 0) {
+        solar_os_gfx_t *gfx = solar_os_context_gfx(ctx);
+        if (gfx != NULL) {
+            dhex_draw_detecting_screen(gfx);
+        }
+        const uint32_t detected = dhex_detect_baud((gpio_num_t)dhex_state.draft_config.rx_pin);
+        if (detected != 0) {
+            SOLAR_OS_LOGI(TAG, "autobaud: detected %u", (unsigned)detected);
+            dhex_state.draft_config.baud = detected;
+        } else {
+            SOLAR_OS_LOGW(TAG, "autobaud: no signal detected, kept %u",
+                         (unsigned)dhex_state.active_config.baud);
+            dhex_state.draft_config.baud = dhex_state.active_config.baud;
+        }
+    }
+
     dhex_uart_stop();
     const esp_err_t ret = dhex_uart_start(&dhex_state.draft_config);
     dhex_state.active_config = dhex_state.draft_config;
@@ -862,7 +1118,7 @@ static bool dhex_event(solar_os_context_t *ctx, const solar_os_event_t *event)
             break;
         case '\r':
         case '\n':
-            dhex_apply_config();
+            dhex_apply_config(ctx);
             dhex_state.config_mode = false;
             dhex_render(ctx);
             break;
