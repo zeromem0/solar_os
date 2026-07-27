@@ -149,6 +149,19 @@
 #define SOLAR_OS_BOARD_UART_NO_FALLBACK_SHELL 1
 
 /*
+ * dhex needs a "PM UART" capability to build at all; there's no
+ * separate pin pair on this board (same constraint as ats_mini_v1),
+ * so it aliases the same UART1/GPIO15-16 pins the console would use
+ * if the fallback shell weren't disabled above. Note the TJA1051
+ * warning above still applies here: until the transceiver is
+ * swapped, dhex on this port shows the oscillating CAN receiver's
+ * garbage, not a real peer.
+ */
+#define SOLAR_OS_BOARD_PM_UART_PORT UART_NUM_1
+#define SOLAR_OS_BOARD_PIN_PM_UART_TX GPIO_NUM_15
+#define SOLAR_OS_BOARD_PIN_PM_UART_RX GPIO_NUM_16
+
+/*
  * Minimal port: display, RTC, SD, UART, connectivity. Not yet wired:
  * GT911 touch (SolarOS has no touch-input capability/service at all
  * yet -- follow-up work, same as Core2's touch), RS485 (SP3485 on
