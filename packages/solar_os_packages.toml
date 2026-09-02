@@ -486,6 +486,11 @@ label = "ESP32 DAC audio output"
 category = "Expansion hardware"
 members = ["driver_audio_esp32_dac"]
 
+[groups.st7789_i80]
+label = "ST7789 display (i80)"
+category = "Expansion hardware"
+members = ["driver_display_st7789_i80"]
+
 [groups.st7305]
 label = "ST7305 display"
 category = "Expansion hardware"
@@ -1344,6 +1349,15 @@ sources = [
 ]
 requires = ["esp_driver_dac", "esp_driver_gpio"]
 capabilities = ["expansion_gpio"]
+
+[packages.driver_display_st7789_i80]
+label = "driver.display-st7789-i80"
+targets = ["esp32s3"]
+sources = [
+  "board/solar_os_board_display_st7789_i80.c",
+  "drivers/tft_st7789_i80.c",
+]
+requires = ["esp_lcd", "esp_driver_gpio", "u8g2"]
 
 [packages.driver_display_st7305]
 label = "driver.display-st7305"
