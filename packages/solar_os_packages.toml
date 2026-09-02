@@ -156,6 +156,16 @@ label = "Clock"
 category = "Utilities"
 members = ["app_clock"]
 
+[groups.irrigation]
+label = "Irrigation"
+category = "Utilities"
+members = ["app_irriga", "job_irrigd", "irrig_web"]
+
+[groups.dhex]
+label = "dhex UART monitor"
+category = "Utilities"
+members = ["app_dhex"]
+
 [groups.calculator]
 label = "Calculator"
 category = "Utilities"
@@ -1797,6 +1807,33 @@ sources = ["apps/solar_os_notes.c"]
 [packages.service_expr]
 label = "service.expr"
 sources = ["services/solar_os_expr.c"]
+
+[packages.app_irriga]
+label = "app.irriga"
+sources = ["apps/solar_os_irriga.c"]
+capabilities = ["gfx"]
+
+[packages.job_irrigd]
+label = "job.irrigd"
+sources = [
+  "jobs/solar_os_irrigd_job.c",
+  "services/solar_os_irrig.c",
+  "shell/solar_os_shell_irrig.c",
+]
+requires = ["esp_driver_gpio", "nvs_flash"]
+
+[packages.irrig_web]
+label = "irrig.web"
+sources = ["jobs/solar_os_irrig_web.c"]
+requires = ["esp_http_server"]
+capabilities = ["wifi"]
+depends = ["job_irrigd"]
+
+[packages.app_dhex]
+label = "app.dhex"
+sources = ["apps/solar_os_dhex.c"]
+requires = ["esp_driver_uart", "nvs_flash"]
+capabilities = ["gfx", "pm_uart"]
 
 [packages.app_calc]
 label = "app.calc"

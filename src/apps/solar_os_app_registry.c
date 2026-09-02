@@ -53,6 +53,12 @@
 #if SOLAR_OS_PACKAGE_APP_FUNCGEN
 #include "solar_os_funcgen.h"
 #endif
+#if SOLAR_OS_PACKAGE_APP_DHEX
+#include "solar_os_dhex.h"
+#endif
+#if SOLAR_OS_PACKAGE_APP_IRRIGA
+#include "solar_os_irriga.h"
+#endif
 #if SOLAR_OS_PACKAGE_APP_CALC
 #include "solar_os_calc.h"
 #endif
@@ -182,6 +188,16 @@ static const solar_os_app_registry_entry_t registered_apps[] = {
 #endif
 #if SOLAR_OS_PACKAGE_APP_FUNCGEN
     APP_ENTRY("funcgen", "audio function generator", &solar_os_funcgen_app, SOLAR_OS_APP_CAP_TEXT | SOLAR_OS_APP_CAP_GRAPHICS | SOLAR_OS_APP_CAP_DISPLAY | SOLAR_OS_APP_CAP_PORT, "funcgen [--tui]", 1, 2),
+#endif
+#if SOLAR_OS_PACKAGE_APP_IRRIGA
+    APP_ENTRY("irriga", "irrigation zones and schedules", &solar_os_irriga_app,
+              SOLAR_OS_APP_CAP_GRAPHICS | SOLAR_OS_APP_CAP_DISPLAY,
+              "irriga", 1, 1),
+#endif
+#if SOLAR_OS_PACKAGE_APP_DHEX
+    APP_ENTRY("dhex", "hex/ascii UART dump", &solar_os_dhex_app,
+              SOLAR_OS_APP_CAP_GRAPHICS | SOLAR_OS_APP_CAP_DISPLAY,
+              "dhex [baud framing rx tx [port]]", 1, 6),
 #endif
 #if SOLAR_OS_PACKAGE_APP_CALC
     APP_ENTRY("calc", "scientific calculator and function plotter", &solar_os_calc_app, SOLAR_OS_APP_CAP_TEXT | SOLAR_OS_APP_CAP_GRAPHICS | SOLAR_OS_APP_CAP_DISPLAY | SOLAR_OS_APP_CAP_PORT, "calc [--tui | -e expression]", 1, 0),

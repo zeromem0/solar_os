@@ -460,6 +460,9 @@ static const shell_command_t shell_builtin_commands[] = {
 #endif
 #if SOLAR_OS_PACKAGE_SERVICE_BLE
     {"ble", "BLE keyboard control", solar_os_shell_cmd_ble},
+#if SOLAR_OS_PACKAGE_JOB_IRRIGD
+    {"irrig", "irrigation zones and schedules", solar_os_shell_cmd_irrig},
+#endif
 #endif
 #if SOLAR_OS_PACKAGE_SERVICE_WIFI
     {"wifi", "Wi-Fi station control", solar_os_shell_cmd_wifi},

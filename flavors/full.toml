@@ -3,6 +3,8 @@ name = "full"
 description = "Default SolarOS build with all built-in packages enabled."
 
 [groups]
+irrigation = true
+dhex = true
 hardware_shell = true
 filesystem = true
 wifi = true

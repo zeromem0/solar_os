@@ -16,6 +16,9 @@
 #if SOLAR_OS_PACKAGE_JOB_DAQ
 #include "solar_os_daq_job.h"
 #endif
+#if SOLAR_OS_PACKAGE_JOB_IRRIGD
+#include "solar_os_irrigd_job.h"
+#endif
 #if SOLAR_OS_PACKAGE_JOB_DISPLAYD
 #include "solar_os_displayd_job.h"
 #endif
@@ -86,6 +89,9 @@ static const solar_os_job_registry_entry_t registered_jobs[] = {
 #endif
 #if SOLAR_OS_PACKAGE_JOB_DAQ
     {"daq", "capture data streams to CSV", &solar_os_daq_job},
+#endif
+#if SOLAR_OS_PACKAGE_JOB_IRRIGD
+    {"irrigd", "irrigation schedule engine (configure with 'irrig')", &solar_os_irrigd_job},
 #endif
 #if SOLAR_OS_PACKAGE_JOB_DISPLAYD
     {"displayd", "authenticated HTTP display mirror", &solar_os_displayd_job},
