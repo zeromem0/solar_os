@@ -44,6 +44,7 @@ static const board_capability_name_t capability_names[] = {
     {SOLAR_OS_BOARD_CAP_SIMD, "simd"},
     {SOLAR_OS_BOARD_CAP_POINTER, "pointer"},
     {SOLAR_OS_BOARD_CAP_STREAMING_DISPLAY, "streaming_display"},
+    {SOLAR_OS_BOARD_CAP_PM_UART, "pm_uart"},
 };
 
 solar_os_board_capabilities_t solar_os_board_capabilities(void)
@@ -85,6 +86,7 @@ solar_os_board_capabilities_t solar_os_board_capabilities(void)
         (SOLAR_OS_BOARD_HAS_POINTER ? SOLAR_OS_BOARD_CAP_POINTER : 0U) |
         (SOLAR_OS_BOARD_HAS_STREAMING_DISPLAY ?
              SOLAR_OS_BOARD_CAP_STREAMING_DISPLAY : 0U) |
+        (SOLAR_OS_BOARD_HAS_PM_UART ? SOLAR_OS_BOARD_CAP_PM_UART : 0U) |
         (SOLAR_OS_BOARD_HAS_PSRAM ? SOLAR_OS_BOARD_CAP_PSRAM : 0U);
 }
 

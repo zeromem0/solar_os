@@ -1098,14 +1098,14 @@ static bool dhex_event(solar_os_context_t *ctx, const solar_os_event_t *event)
     if (event->type == SOLAR_OS_EVENT_CHAR) {
         const uint8_t ch = (uint8_t)event->data.ch;
         if (ch == SOLAR_OS_KEY_APP_EXIT) {
-            solar_os_context_request_exit(ctx);
+            solar_os_context_finish(ctx, 0, NULL);
             return true;
         }
 
         if (!dhex_state.config_mode) {
             switch (ch) {
             case SOLAR_OS_KEY_ESCAPE:
-                solar_os_context_request_exit(ctx);
+                solar_os_context_finish(ctx, 0, NULL);
                 break;
             case '\r':
             case '\n':
@@ -1173,6 +1173,7 @@ static bool dhex_event(solar_os_context_t *ctx, const solar_os_event_t *event)
 const solar_os_app_t solar_os_dhex_app = {
     .name = "dhex",
     .summary = "hex/ascii UART dump; usage: dhex [baud framing rx tx [port]] e.g. dhex 9600 8E1 13 14; Enter opens a settings screen (baud/bits/parity/stop) that reconfigures and saves on exit",
+    .app_class = SOLAR_OS_APP_CLASS_GUI,
     .flags = SOLAR_OS_APP_FLAG_RESUMABLE,
     .start = dhex_start,
     .suspend = dhex_suspend,

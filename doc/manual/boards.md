@@ -233,6 +233,7 @@ The current capability flags are:
 | `DISPLAY_BRIGHTNESS` | Display backlight or brightness control is available. |
 | `POINTER` | Board-integrated absolute or relative pointing input. Events carry a source, pointer ID, display target, coordinates, deltas, buttons, and press/move/release action. |
 | `STREAMING_DISPLAY` | The board's primary display has a bounded-cadence raster-frame presenter suitable for animation or games. This is separate from ordinary terminal and GUI drawing. |
+| `PM_UART` | A dedicated UART is wired to a port/expansion connector for monitoring an external device, separate from the console UART. |
 | `TEMPERATURE` | Temperature sensor service. |
 | `HUMIDITY` | Humidity sensor service. |
 
