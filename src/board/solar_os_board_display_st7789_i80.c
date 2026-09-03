@@ -167,10 +167,12 @@ esp_err_t solar_os_board_display_set_colors(solar_os_board_display_t *display,
                                             uint32_t foreground_rgb888,
                                             uint32_t background_rgb888)
 {
+    /* The panel blits the u8g2 mono buffer with fixed colors; accept and
+     * ignore, as the shared layer does for drivers without the op. */
     (void)display;
     (void)foreground_rgb888;
     (void)background_rgb888;
-    return ESP_ERR_NOT_SUPPORTED;
+    return ESP_OK;
 }
 
 esp_err_t solar_os_board_display_set_high_refresh_override(solar_os_board_display_t *display,
