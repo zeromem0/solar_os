@@ -25,6 +25,9 @@ typedef struct {
     uint16_t height;
     uint8_t madctl;
     bool st7796;
+    /* Issue INVON regardless of controller family. M5Stack's ILI9342C
+     * glass renders in negative without it. */
+    bool invert;
     bool backlight_active_high;
     bool backlight_pwm;
     const u8g2_cb_t *rotation;

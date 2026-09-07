@@ -489,6 +489,51 @@ Controls:
 
 - App-exit key exits.
 
+## dhex
+
+Hex and ASCII dump of a UART, for looking at a device that talks bytes. The
+port defaults to the board's monitor UART and is reconfigurable at runtime;
+`Enter` opens a settings screen for baud rate, data bits, parity and stop
+bits, which reconfigures the port and saves on exit. Requires the `pm_uart`
+board capability.
+
+Usage:
+
+```text
+dhex
+dhex <baud> <framing> <rx> <tx> [port]
+```
+
+Example: `dhex 9600 8E1 13 14`.
+
+Controls:
+
+- `Enter` opens and closes the settings screen.
+- `Esc` or app-exit key exits.
+
+## irriga
+
+Irrigation controller: up to eight zones, four schedule slots each, with a
+weekday mask per slot and an automatic or manual mode. The schedule engine
+itself is the `irrigd` job, which also serves a configuration page over HTTP
+on port 8081, so the zones can be set from a browser with no server involved.
+Configuration is persisted in NVS and survives reboots. Zone state is
+evaluated against wall-clock time, so the board needs an RTC or NTP.
+
+Usage:
+
+```text
+irriga
+```
+
+The `irrig` shell command configures the same engine without the graphical
+interface, and `job start irrigd` runs the engine on its own.
+
+Controls:
+
+- `S` opens the settings screen.
+- `Esc` or app-exit key exits.
+
 ## curl
 
 HTTP client for quick text downloads and diagnostics. It can print response

@@ -834,6 +834,12 @@ available for the compiled board.
 | `audio` | `audio loopback [ms] [volume]` | Run microphone-to-speaker loopback. |
 | `audio` | `audio off` | Stop audio output. |
 | `led` | `led [status|on|off|toggle]` | Inspect or control the built-in status LED when available. |
+| `irrig` | `irrig [status]` | Show irrigation zones, mode, and the next scheduled run. |
+| `irrig` | `irrig zones <1..8>` | Set how many zones the engine drives. |
+| `irrig` | `irrig mode auto\|manual` | Follow the schedules or drive zones by hand. |
+| `irrig` | `irrig on <zone>`; `irrig off <zone>` | Open or close one zone in manual mode. |
+| `irrig` | `irrig set <zone> <slot 1-4> <HH:MM> <HH:MM> <days> <A\|->` | Program one schedule slot; days are 7 Monday-first characters, `-` skips. |
+| `irrig` | `irrig pin <zone> <gpio\|->` | Bind a zone to a GPIO, or release it. |
 | `expansion` | `expansion [status]` | Show expansion capabilities, named buses and leases, connector resources, active devices, and resource claims. |
 | `expansion` | `expansion layout [connector]` | Draw the board's physical connector map with live free, releasable, claimed, fixed, power, ground, and NC markers. |
 | `expansion` | `expansion scan` | List expansion resources and probe-capable drivers. |
