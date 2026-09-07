@@ -1494,6 +1494,37 @@ static void maybe_enter_idle_sleep(void)
     }
 }
 
+#ifndef SOLAR_OS_BOARD_ALWAYS_PORT_SHELL
+#define SOLAR_OS_BOARD_ALWAYS_PORT_SHELL 0
+#endif
+
+/* A board whose only input is a BLE keyboard has no way back if that keyboard
+ * stops answering, so it can ask for a shell on the CDC console beside the
+ * on-screen one instead of only in place of it. */
+static void start_debug_port_shell_if_configured(void)
+{
+#if SOLAR_OS_BOARD_ALWAYS_PORT_SHELL
+    if (!board_has(SOLAR_OS_BOARD_CAP_CDC)) {
+        return;
+    }
+
+    uint8_t session_id = 0;
+    const esp_err_t err =
+        solar_os_port_shell_start(&os_ctx, SOLAR_OS_CDC_PORT_NAME, false, &session_id);
+    if (err == ESP_OK) {
+        SOLAR_OS_LOGI(TAG,
+                      "Shell session %u started on %s",
+                      (unsigned)session_id,
+                      SOLAR_OS_CDC_PORT_NAME);
+    } else {
+        SOLAR_OS_LOGW(TAG,
+                      "Shell on %s failed: %s",
+                      SOLAR_OS_CDC_PORT_NAME,
+                      esp_err_to_name(err));
+    }
+#endif
+}
+
 static void start_headless_shell_if_needed(void)
 {
     if (terminal != NULL) {
@@ -1669,6 +1700,7 @@ void app_main(void)
     if (terminal != NULL) {
         const bool shell_started = solar_os_sessions_switch_to_app(solar_os_shell_app());
         ESP_LOGI(TAG, "boot milestone: shell switch=%s", shell_started ? "ok" : "failed");
+        start_debug_port_shell_if_configured();
     } else {
         start_headless_shell_if_needed();
     }

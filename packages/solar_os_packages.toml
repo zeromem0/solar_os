@@ -1961,3 +1961,19 @@ sources = [
 ]
 capabilities = ["psram"]
 any_capabilities = ["expansion_spi", "expansion_gpio", "expansion_uart"]
+
+[packages.driver_display_ili9342c_cores3]
+label = "driver.display-ili9342c-cores3"
+targets = ["esp32s3"]
+depends = ["service_spi"]
+sources = [
+  "board/solar_os_board_display_ili9342c_cores3.c",
+  "drivers/tft_ili9341.c",
+]
+requires = ["esp_driver_gpio", "esp_driver_spi", "u8g2"]
+capabilities = ["gfx"]
+
+[groups.ili9342c_cores3]
+label = "CoreS3 ILI9342C display"
+category = "Drivers"
+members = ["driver_display_ili9342c_cores3"]
